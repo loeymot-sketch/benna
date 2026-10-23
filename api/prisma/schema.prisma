@@ -1,0 +1,321 @@
+// EL BENNA LAB OS — Prisma schema (SQLite, V1)
+// Note: SQLite for zero-friction dev. For production, swap to PostgreSQL by changing
+// the provider and DATABASE_URL — the schema is compatible (no SQLite-only types used).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Core ────────────────────────────────────────────────────────────────────
+model User {
+  id              String    @id @default(cuid())
+  pinHash         String
+  pinSet          Boolean   @default(false) // false until first login pick
+  mustChangePin   Boolean   @default(false) // true: code temporaire remis par un admin, à changer à la 1ère connexion
+  firstName       String
+  lastName        String
+  avatar          String?
+  role            String    // ADMIN | MANAGER | RECEPTION | DESIGNER | PRODUCTION | PHOTOGRAPHER
+  shopId          String?
+  shop            Shop?     @relation(fields: [shopId], references: [id])
+  isActive        Boolean   @default(true)
+  failedAttempts  Int       @default(0)
+  lockedUntil     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  ordersCreated   Order[]   @relation("CreatedBy")
+  ordersAssigned  Order[]   @relation("AssignedTo")
+  payments        Payment[]
+  auditLogs       AuditLog[]
+  statusChanges   OrderStatusHistory[]
+
+  postsAuthored   TeamPost[] @relation("PostAuthor")
+  postsReceived   TeamPost[] @relation("PostRecipient")
+  postsResolved   TeamPost[] @relation("PostResolver")
+  postReceipts    PostReadReceipt[]
+  postReactions   PostReaction[]
+  postMentions    PostMention[]
+
+  absences        Absence[]
+  substituteFor   Absence[] @relation("AbsenceSubstitute")
+  absencesApproved Absence[] @relation("AbsenceApprover")
+}
+
+model Shop {
+  id        String   @id @default(cuid())
+  name      String
+  address   String
+  phone     String
+  isActive  Boolean  @default(true)
+  users     User[]
+  orders    Order[]
+  posts     TeamPost[]
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  fullName  String
+  phone     String   @unique
+  email     String?
+  notes     String?
+  tags      String   @default("[]") // JSON array of strings
+  createdAt DateTime @default(now())
+  orders    Order[]
+}
+
+model Service {
+  id     String  @id @default(cuid())
+  code   String  @unique
+  name   String
+  icon   String?
+  catalogItems CatalogItem[]
+  orders ServiceOnOrder[]
+}
+
+model ServiceOnOrder {
+  orderId   String
+  serviceId String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  service   Service @relation(fields: [serviceId], references: [id])
+  @@id([orderId, serviceId])
+}
+
+model CatalogItem {
+  id          String    @id @default(cuid())
+  name        String
+  serviceId   String
+  service     Service   @relation(fields: [serviceId], references: [id])
+  unitPrice   Float
+  unit        String
+  isActive    Boolean   @default(true)
+  lineItems   OrderLineItem[]
+}
+
+model Order {
+  id              String   @id @default(cuid())
+  ticketCode      String   @unique
+  pouchNumber     String?
+  shopId          String
+  shop            Shop     @relation(fields: [shopId], references: [id])
+  customerId      String
+  customer        Customer @relation(fields: [customerId], references: [id])
+  description     String
+  totalAmount     Float
+  paidAmount      Float    @default(0)
+  discountAmount  Float    @default(0)
+  paymentStatus   String   // IMPAYE | ACOMPTE | PAYE
+  urgency         String   // NORMAL | PRIORITAIRE | URGENT | EXPRESS
+  status          String   // RECUE | EN_ATTENTE | EN_COURS_DESIGN | VALIDATION_CLIENT | EN_PRODUCTION | EN_FINITION | PRETE | LIVREE | ANNULEE
+  productionSubStatus String?
+  deliveryDate    DateTime
+  deliveryTime    String?
+  internalNotes   String?
+  createdById     String
+  createdBy       User     @relation("CreatedBy", fields: [createdById], references: [id])
+  assignedToId    String?
+  assignedTo      User?    @relation("AssignedTo", fields: [assignedToId], references: [id])
+  services        ServiceOnOrder[]
+  lineItems       OrderLineItem[]
+  attachments     Attachment[]
+  payments        Payment[]
+  statusHistory   OrderStatusHistory[]
+  posts           TeamPost[]
+  notifications   Notification[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  @@index([status])
+  @@index([shopId, deliveryDate])
+  @@index([customerId])
+}
+
+model OrderLineItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  catalogItemId String?
+  catalogItem   CatalogItem? @relation(fields: [catalogItemId], references: [id])
+  description   String
+  quantity      Int
+  unitPrice     Float
+  total         Float
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount    Float
+  method    String   // ESPECES | CARTE | VIREMENT | CHEQUE | D17 | EDINAR | AUTRE
+  reference String?
+  receivedById String
+  receivedBy   User  @relation(fields: [receivedById], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  filename  String
+  path      String
+  thumbnail String?
+  mimeType  String
+  size      Int
+  kind      String   // POUCH_SCAN | CUSTOMER_PROOF | SOURCE_FILE | REFERENCE | DELIVERY_PROOF
+  createdAt DateTime @default(now())
+}
+
+model OrderStatusHistory {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus  String?
+  toStatus    String
+  changedById String
+  changedBy   User     @relation(fields: [changedById], references: [id])
+  comment     String?
+  createdAt   DateTime @default(now())
+
+  @@index([orderId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id])
+  channel   String   // SMS | WHATSAPP | EMAIL
+  recipient String
+  message   String
+  status    String   // PENDING | SENT | FAILED
+  errorMsg  String?
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String
+  entityType  String
+  entityId    String
+  payload     String?  // JSON
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+}
+
+// ─── Carnet (Addendum #1) ────────────────────────────────────────────────────
+model TeamPost {
+  id              String   @id @default(cuid())
+  type            String   // HANDOFF | TASK | ABSENCE_NOTE | QUESTION | ANNOUNCEMENT | ALERT | NOTE | SHIFT_HANDOVER
+  title           String?
+  body            String
+
+  authorId        String
+  author          User     @relation("PostAuthor", fields: [authorId], references: [id])
+
+  scope           String   // PRIVATE | DIRECT | ROLE | SHOP | ALL
+  recipientUserId String?
+  recipientUser   User?    @relation("PostRecipient", fields: [recipientUserId], references: [id])
+  recipientRole   String?
+  recipientShopId String?
+  recipientShop   Shop?    @relation(fields: [recipientShopId], references: [id])
+
+  orderId         String?
+  order           Order?   @relation(fields: [orderId], references: [id])
+
+  status          String   @default("OPEN") // OPEN | SEEN | RESOLVED | ARCHIVED
+  urgency         String   @default("NORMAL")
+  deadline        DateTime?
+  pinnedUntil     DateTime?
+  resolvedAt      DateTime?
+  resolvedById    String?
+  resolvedBy      User?    @relation("PostResolver", fields: [resolvedById], references: [id])
+
+  absenceId       String?  @unique
+  absence         Absence? @relation(fields: [absenceId], references: [id])
+
+  parentId        String?
+  parent          TeamPost? @relation("PostThread", fields: [parentId], references: [id])
+  replies         TeamPost[] @relation("PostThread")
+  receipts        PostReadReceipt[]
+  reactions       PostReaction[]
+  mentions        PostMention[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([authorId])
+  @@index([recipientUserId, status])
+  @@index([orderId])
+  @@index([type, status])
+}
+
+model PostReadReceipt {
+  id        String   @id @default(cuid())
+  postId    String
+  post      TeamPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  readAt    DateTime @default(now())
+
+  @@unique([postId, userId])
+}
+
+model PostReaction {
+  id        String   @id @default(cuid())
+  postId    String
+  post      TeamPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  emoji     String   // THUMBS_UP | CHECK | EYES | QUESTION | ALERT
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId, emoji])
+}
+
+model PostMention {
+  id        String   @id @default(cuid())
+  postId    String
+  post      TeamPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([postId, userId])
+}
+
+model Absence {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  startDate       DateTime
+  endDate         DateTime
+  type            String   // CONGE | MALADIE | RDV | FORMATION | AUTRE
+  notes           String?
+  substituteId    String?
+  substitute      User?    @relation("AbsenceSubstitute", fields: [substituteId], references: [id])
+  approvedById    String?
+  approvedBy      User?    @relation("AbsenceApprover", fields: [approvedById], references: [id])
+  status          String   @default("PENDING")
+  post            TeamPost?
+  createdAt       DateTime @default(now())
+}
+
+model Setting {
+  key   String @id
+  value String // JSON
+}

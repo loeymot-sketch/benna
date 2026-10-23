@@ -1,0 +1,7 @@
+ARCHIVE — fichiers qui ne servent pas au fonctionnement du site (rien n'est supprimé).
+
+maquettes-design/   Maquettes statiques JSX/HTML d'origine (design de référence) + photo de pochette d'exemple.
+                    Ouvrir : cd maquettes-design && python3 -m http.server 8080
+                    puis http://localhost:8080/El%20Benna%20Lab%20OS.html
+
+Le projet déployable est dans ../elbenna-lab-os/ (voir son README.md).

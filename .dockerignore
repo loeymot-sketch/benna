@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.DS_Store
+**/*.log
+**/*.tsbuildinfo
+api/.env
+api/prisma/data
+api/data
+backups
