@@ -1,4 +1,5 @@
 import { api } from './api';
+import { shrinkImage } from './image';
 
 export type PouchData = {
   pouchNumber: string | null;
@@ -24,7 +25,7 @@ export const FIELD_LABELS: Record<string, string> = {
 // Envoie la photo de la pochette à l'API, qui interroge le provider Vision configuré.
 export async function extractPouch(file: File): Promise<PouchExtraction> {
   const fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', await shrinkImage(file));
   try {
     const r = await api.post<PouchExtraction>('/vision/extract-pouch', fd);
     return r.data;

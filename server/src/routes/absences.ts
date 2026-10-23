@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth, requireRole } from '../auth.js';
 import { audit } from '../audit.js';
-import { emit } from '../io.js';
+import { emit } from '../events.js';
 
 export default async function absencesRoutes(app: FastifyInstance) {
   app.get('/absences', { preHandler: requireAuth }, async () => {
@@ -53,7 +53,7 @@ export default async function absencesRoutes(app: FastifyInstance) {
       },
     });
     await audit({ userId: req.user.sub, action: 'ABSENCE_CREATED', entityType: 'Absence', entityId: absence.id });
-    emit('absence.created', { id: absence.id, postId: post.id });
+    await emit('absence.created', { id: absence.id, postId: post.id });
     return { absence, post };
   });
 

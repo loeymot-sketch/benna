@@ -20,9 +20,9 @@ export default async function customersRoutes(app: FastifyInstance) {
     const where = q
       ? {
           OR: [
-            { fullName: { contains: q } },
-            { phone: { contains: q } },
-            { email: { contains: q } },
+            { fullName: { contains: q, mode: 'insensitive' as const } },
+            { phone: { contains: q, mode: 'insensitive' as const } },
+            { email: { contains: q, mode: 'insensitive' as const } },
           ],
         }
       : {};

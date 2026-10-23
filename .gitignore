@@ -1,13 +1,14 @@
 node_modules/
-dist/
+web/dist/
 .DS_Store
 *.log
 *.tsbuildinfo
 
 # Secrets et données : ne jamais versionner
-api/.env
-api/prisma/data/*.db
-api/prisma/data/*.db-journal
-api/data/uploads/*
-!api/data/uploads/.gitkeep
+.env
+data/uploads/*
+!data/uploads/.gitkeep
 backups/
+.vercel
+*.db
+*.db-journal

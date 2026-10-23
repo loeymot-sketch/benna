@@ -8,67 +8,31 @@ Remplace le workflow papier (pochettes manuscrites) par une plateforme web moder
 
 ```
 elbenna-lab-os/
-├── api/          # Fastify + Prisma + SQLite + Socket.io  (port 8787)
-│   ├── src/
-│   │   ├── index.ts             # entrypoint
-│   │   ├── db.ts                # PrismaClient singleton
-│   │   ├── auth.ts              # JWT + role helpers
-│   │   ├── audit.ts             # AuditLog helper
-│   │   ├── io.ts                # Socket.io server
-│   │   └── routes/
-│   │       ├── auth.ts          # PIN login, setup, lockout
-│   │       ├── me.ts            # Current user + inbox count
-│   │       ├── users.ts         # List + admin team management
-│   │       ├── customers.ts     # CRM léger
-│   │       ├── orders.ts        # Création, statut, paiements, dashboard, caisse
-│   │       ├── posts.ts         # Le Carnet (mur, inbox, threads, réactions)
-│   │       ├── absences.ts      # Absences + auto post Carnet
-│   │       ├── catalog.ts       # Services + catalogue + boutiques
-│   │       ├── track.ts         # Page publique (no auth) + QR PNG
-│   │       ├── vision.ts        # Stub IA (placeholder pour GLM-OCR/Gemini/OpenAI)
-│   │       └── uploads.ts       # Pièces jointes commande
-│   ├── prisma/
-│   │   ├── schema.prisma        # Schéma complet (~25 tables)
-│   │   ├── seed-real.ts         # Comptes réels + données de référence (npm run db:init)
-│   │   └── seed-demo.ts         # Fausses commandes de démonstration (efface tout)
-│   └── data/
-│       ├── dev.db               # SQLite (auto-créé)
-│       └── uploads/             # Fichiers uploadés
-└── web/          # Vite + React 18 + TS strict + Tailwind + dnd-kit  (port 5173)
-    └── src/
-        ├── main.tsx              # Routes
-        ├── components/
-        │   ├── Atoms.tsx         # Logo, Avatar, Badge, StatusPill, UrgencyDot, Card, Button…
-        │   └── Shell.tsx         # Sidebar + TopBar (responsive)
-        ├── lib/
-        │   ├── tokens.ts         # Design tokens extraits de screens.jsx
-        │   ├── api.ts            # axios + JWT interceptor
-        │   └── socket.ts         # Socket.io client
-        ├── store/auth.ts         # Zustand auth state (persisté localStorage)
-        └── routes/               # 1 fichier par écran
-            ├── Login.tsx
-            ├── Dashboard.tsx
-            ├── Orders.tsx        # Liste + filtres
-            ├── OrderDetail.tsx   # Onglets Infos / Paiements / Pièces jointes / Historique / Carnet
-            ├── OrderNew.tsx      # Formulaire création (avec bouton scan IA stub)
-            ├── Kanban.tsx        # Drag-and-drop entre colonnes
-            ├── Carnet.tsx        # Layout + Mur + Pour Moi + Composer + Post Detail
-            ├── Customers.tsx     # CRM
-            ├── Cash.tsx          # Caisse du jour
-            ├── Team.tsx          # Gestion équipe (admin)
-            ├── Scan.tsx          # Scan pochette (UI prête, IA stub)
-            └── Track.tsx         # Page publique sans login
+├── server/            # API Fastify + Prisma (PostgreSQL)
+│   ├── src/           #   app.ts (routes /api/*) · index.ts (serveur local) · vercel.ts (fonction Vercel)
+│   │   ├── routes/    #   auth, orders, posts (Carnet), finance (caisse protégée), vision (scan IA), events…
+│   │   ├── storage.ts #   pièces jointes : Supabase Storage (prod) ou disque (dev)
+│   │   └── events.ts  #   évènements « temps réel » écrits en base
+│   └── prisma/        #   schema.prisma · seed-real.ts (comptes) · seed-demo.ts (fausses commandes)
+├── api/index.js       # fonction Vercel = bundle de server/src/vercel.ts (généré par `npm run build:api`, commité)
+├── web/               # Site Vite + React 18 + TypeScript + Tailwind
+├── vercel.json        # build + routage Vercel
+└── package.json       # dépendances du serveur + scripts (dev, build, db:init…)
 ```
+
+Hébergement 100 % gratuit possible : **Vercel** (site + API en fonction) + **Supabase** (Postgres + Storage).
+Le « temps réel » est un rafraîchissement automatique (4 s) : Vercel ne supporte pas les WebSocket.
 
 ## Démarrage (développement)
 
-Pré-requis : Node 18+ et npm (SQLite, pas de Docker).
+Pré-requis : Node 20+, et une base Postgres (un projet Supabase de test convient — voir ci-dessous).
 
 ```bash
-./start.sh          # installe, crée la base + comptes, lance API (8787) et site (5173)
+cp .env.example .env     # puis renseigne DATABASE_URL, DIRECT_URL, JWT_SECRET (+ clé IA)
+./start.sh               # installe, crée tables + comptes, lance API (8787) et site (5173)
 ```
 
-Puis <http://localhost:5173>. Données de démonstration (fausses commandes) : `cd api && npm run db:seed-demo` (⚠ efface tout).
+Puis <http://localhost:5173>. Fausses commandes de démo : `npm run db:seed-demo` (⚠ efface tout).
 
 ## Comptes
 
@@ -80,45 +44,36 @@ Puis <http://localhost:5173>. Données de démonstration (fausses commandes) : `
 
 Code par défaut **0000** pour tous. À la connexion, chacun peut choisir son code personnel
 (admin : 6 chiffres, autres : 4) ; l'invitation revient tant que ce n'est pas fait.
-Un admin peut réinitialiser / fixer un code dans **Équipe**. Les codes sont stockés hachés (bcrypt) : personne ne peut les lire.
-Remettre 0000 à tous : `cd api && RESET_PINS=1 npm run db:seed-real`.
+Un admin peut réinitialiser / fixer un code dans **Équipe**. Les codes sont stockés hachés (bcrypt).
+Remettre 0000 à tous : `RESET_PINS=1 npm run db:seed-real`.
 
-## Déploiement (production)
+## Déploiement gratuit : Supabase + Vercel
 
-Un seul processus : l'API sert aussi le site compilé (`web/dist`).
+### 1. Supabase (base + fichiers)
+1. supabase.com → *New project* (région Europe, note le mot de passe de la base).
+2. *Project Settings → Database → Connection string* :
+   - **Transaction pooler** (port 6543) → c'est `DATABASE_URL`, ajoute à la fin `?pgbouncer=true&connection_limit=1`
+   - **Session pooler** (port 5432) → c'est `DIRECT_URL`
+3. *Storage → New bucket* : nom **`attachments`**, **Private** (décoché « Public »).
+4. *Project Settings → API* : `Project URL` → `SUPABASE_URL` ; clé **service_role** → `SUPABASE_SERVICE_KEY` (secrète : jamais dans le code ni dans le navigateur).
 
-```bash
-./start-prod.sh     # 1re fois : crée api/.env (secret aléatoire), installe, compile, crée base + comptes, démarre
-```
+### 2. Créer les tables et les comptes (une seule fois, depuis ton Mac)
+Mets les 4 valeurs dans `.env` (modèle : `.env.example`), puis : `npm install && npm run db:init`
 
-1. Dans `api/.env` : `FRONTEND_ORIGIN` / `PUBLIC_BASE_URL` = adresse publique du site (sert au QR de suivi client),
-   et la clé du scan IA (`OPENROUTER_API_KEY`…). Modèle : `api/.env.example`.
-2. L'API **refuse de démarrer** en production avec un `JWT_SECRET` faible ou de développement.
-3. Mets le site derrière HTTPS (reverse proxy Caddy / nginx → port 8787, WebSocket `/socket.io` inclus).
-4. Garde le processus vivant : `pm2 start "npm run start:prod" --name elbenna --cwd api` (ou systemd).
-5. **Avant l'ouverture : chaque admin change son code 0000.**
-6. Sauvegardes : copie `api/prisma/data/prod.db` et `api/data/uploads/` (ex. `cp api/prisma/data/prod.db backups/prod-$(date +%F).db`).
+### 3. Vercel (site + API)
+1. *Add New → Project* → importe le dépôt GitHub. **Root Directory : vide (racine du dépôt)**. Framework : *Other*.
+   Le fichier `vercel.json` s'occupe du reste (build, dossier de sortie, routage).
+2. *Settings → Environment Variables* : `DATABASE_URL`, `JWT_SECRET` (`openssl rand -hex 32`), `SUPABASE_URL`,
+   `SUPABASE_SERVICE_KEY`, `SUPABASE_BUCKET=attachments`, `PUBLIC_BASE_URL` (l'adresse du site), `OPENROUTER_API_KEY`.
+   **Ne mets PAS** `VITE_API_URL`.
+3. *Deploy*. Puis ouvre l'adresse : 7 profils, code `0000`, **chaque admin change son code**.
 
-Tout l'API est sous `/api/*` ; `/uploads/*` = pièces jointes ; les autres adresses sont les pages du site.
+### À savoir
+- Si tu modifies le code du serveur : `npm run build:api` régénère `api/index.js` (Vercel le refait aussi au build) — commite-le.
+- Photos : réduites à ~1800 px avant envoi (limite Vercel 4,5 Mo par requête).
+- Supabase gratuit met le projet en pause après ~1 semaine sans activité : un clic pour le relancer.
+- Vercel *Hobby* est réservé à un usage non commercial (conditions de Vercel).
 
-
-### Variante : site sur Vercel + API sur un petit hébergeur
-
-Vercel ne fait tourner que le site (pas de disque persistant ni de WebSocket) : l'API (SQLite, photos, temps réel)
-doit tourner ailleurs avec le `Dockerfile` (Railway, Fly.io, VPS…).
-
-**1. API** (Railway/Fly/VPS, volume sur `/data`, une seule instance) — variables :
-`JWT_SECRET` (32+ car. aléatoires), `FRONTEND_ORIGIN=https://ton-site.vercel.app` (plusieurs adresses possibles, séparées par des virgules),
-`PUBLIC_BASE_URL=https://ton-site.vercel.app`, `OPENROUTER_API_KEY`. Note l'adresse publique de l'API (ex. `https://elbenna-api.up.railway.app`).
-
-**2. Vercel** — projet importé depuis le dépôt. Le `vercel.json` de la racine déclare **uniquement** le site (`web`) : l'API n'est volontairement PAS déployée sur Vercel
-(SQLite, photos et WebSocket n'y fonctionnent pas). Si Vercel propose d'ajouter un service « api », refuse. Alternative sans ce fichier : *Settings → General* :
-- **Root Directory : `web`**
-- Framework Preset : Vite (détecté via `web/vercel.json`)
-- *Environment Variables* : `VITE_API_URL=https://elbenna-api.up.railway.app` (adresse de l'API, sans `/` final)
-- puis **Redeploy** : la variable n'est lue qu'à la compilation.
-
-Seule l'adresse inscrite dans `FRONTEND_ORIGIN` peut parler à l'API (les URL d'aperçu Vercel `*-git-*.vercel.app` sont refusées tant qu'on ne les ajoute pas).
 
 ## Features livrées V1
 
@@ -128,7 +83,7 @@ Seule l'adresse inscrite dans `FRONTEND_ORIGIN` peut parler à l'API (les URL d'
 | Création commande | ✅ | Code auto `LB-YYYYMM-XXXX`, services multi-select, lignes, urgence, livraison |
 | Détail commande | ✅ | 5 onglets : Infos / Paiements / Pièces jointes / Historique / Carnet |
 | Multi-paiements | ✅ | Espèces / Carte / Virement / Chèque / D17 / Edinar — auto-update statut paiement |
-| Kanban temps réel | ✅ | Drag-and-drop @dnd-kit + Socket.io broadcast à tous les postes |
+| Kanban temps réel | ✅ | Drag-and-drop @dnd-kit + mise à jour automatique des autres postes (4 s) |
 | Liste commandes | ✅ | Filtres rapides + recherche fuzzy (ticket, client, GSM, pochette) |
 | Dashboard | ✅ | 6 cartes KPI + activité + répartition par statut |
 | Le Carnet (Addendum #1) | ✅ | 8 types imposés, scopes (DIRECT/ROLE/SHOP/ALL), threads, accusés, réactions, mentions, absences |
@@ -142,14 +97,14 @@ Seule l'adresse inscrite dans `FRONTEND_ORIGIN` peut parler à l'API (les URL d'
 | **Mon profil** | ✅ | Chaque membre peut **changer son PIN** lui-même + voir l'état session |
 | Session 30 jours | ✅ | JWT longue durée — **pas de re-login pendant la journée**. Localstorage persisté. |
 | Pièces jointes | ✅ | Upload, thumbnails servis statiquement |
-| Socket.io | ✅ | Events : `order.created`, `order.updated`, `order.status_changed`, `post.created`, `post.resolved`, … |
+| Évènements | ✅ | Table `Event` relue par chaque poste (`GET /api/events`) : `order.created`, `order.status_changed`, `post.created`… |
 | **Responsive PC / tablette / mobile** | ✅ | Sidebar collapse < 900px (icônes seules), TopBar adaptatif, login keypad full-screen mobile |
 | Design fidèle | ✅ | Tokens extraits de `screens.jsx` (COLORS, FONT) — composants Logo, StatusPill, UrgencyDot, etc. |
 | Format Tunisien | ✅ | Téléphones `+216 28 555 123`, devise TND avec millimes, dates dd/MM/yyyy |
 
 ## Reportés V2 (documentés)
 
-- **Vision IA pochette** : adapter pattern en place (`api/src/routes/vision.ts`) ; retourne actuellement des données factices pour démo. Brancher GLM-OCR / Gemini Flash / OpenAI nécessite uniquement une clé API et un prompt système (cf. PROMPT_ULTIME §API Vision).
+- **Scan IA pochette** : opérationnel (OpenRouter / OpenAI / Gemini / Anthropic, cascade configurable). Sans clé : mode démo à données factices.
 - **WhatsApp / SMS réels** : adapter pattern à ajouter (Twilio + Meta WhatsApp Business Cloud). En V1, les notifications sont en log-only.
 - **PWA offline-first complète** (Service Worker + Background Sync) : nécessite une session dédiée.
 - **AR / RTL** (i18next) : structure prête (composants utilisent les tokens), nécessite traductions.
@@ -186,7 +141,7 @@ GET    /orders?status=&q=&mine=  Liste
 GET    /orders/:id               Détail complet (relations)
 POST   /orders                   Créer (auto ticketCode)
 PATCH  /orders/:id
-POST   /orders/:id/status        Changer statut → broadcast Socket.io
+POST   /orders/:id/status        Changer statut → notifie les autres postes
 POST   /orders/:id/payments      Encaisser → maj paymentStatus auto
 POST   /orders/:id/attachments   multipart/form-data
 
@@ -223,7 +178,7 @@ Smoke E2E API (script reproductible — voir CHANGELOG) :
 - ✅ /me retourne le bon utilisateur + boutique
 - ✅ Lookup-or-create customer (auto-création)
 - ✅ Create order → ticket auto `LB-202605-0006`
-- ✅ Status change `RECUE → EN_PRODUCTION` (broadcast Socket.io)
+- ✅ Status change `RECUE → EN_PRODUCTION` (notifie les autres postes)
 - ✅ Multi-payment : 10 + 40 = 50 → auto status `PAYE`
 - ✅ Public tracking sans token (timeline + données restreintes)
 - ✅ QR PNG (HTTP 200, 2110 bytes)
@@ -238,7 +193,7 @@ Vérification visuelle massive dans le navigateur (3 viewports) :
 
 **Mobile 390×844** : Sidebar collapse en icônes seules, TopBar avec titre tronqué propre + bouton "+" compact, Login keypad full-screen avec branding header compact, Login picker en 2 colonnes, cards stack vertical.
 
-**Synchronisation Socket.io vérifiée** :
+**Synchronisation vérifiée** :
 - Sonia (session A) crée la commande `LB-202605-0007 Sync Test` via API
 - Adel (session B) sur Kanban voit la nouvelle carte apparaître **automatiquement** (compteur passé de 1 à 2 sur "Reçue", sidebar Commandes 5 → 6)
 - Sonia change ensuite le statut → `EN_PRODUCTION` → la carte se déplace **automatiquement** dans la colonne Production sur l'écran d'Adel sans reload
@@ -249,31 +204,13 @@ Vérification visuelle massive dans le navigateur (3 viewports) :
 - ✅ Tentative `change-pin` avec mauvais PIN actuel → rejeté `bad_current_pin`
 - ✅ JWT validité = 30 jours (pas de re-login dans la journée)
 
-## Variables d'environnement
-
-`api/.env` :
-```
-DATABASE_URL="file:./data/dev.db"
-JWT_SECRET="<32+ caractères aléatoires : openssl rand -hex 32>"
-PORT=8787
-FRONTEND_ORIGIN="http://localhost:5173"
-PUBLIC_BASE_URL="http://localhost:5173"
-```
-
-## Migration vers PostgreSQL
-
-Le schéma Prisma est compatible PostgreSQL (zéro type spécifique SQLite). Pour passer à Postgres / Supabase :
-1. `provider = "postgresql"` dans `schema.prisma`
-2. `DATABASE_URL` pointant vers Postgres
-3. `npx prisma migrate dev --name init`
-
 ## Décisions de conception
 
-- **SQLite en V1** : zéro friction d'installation pour tester. Schéma compatible pour migrer en PostgreSQL avant prod.
+- **PostgreSQL (Supabase)** : base gérée et gratuite, compatible hébergement sans serveur ; fichiers dans Supabase Storage.
 - **Pas de monorepo pnpm** : npm fonctionne, deux projets indépendants (api/ et web/) — moins de magie, plus simple à déployer.
 - **TypeScript strict** : zéro `any`, validation Zod sur toutes les entrées API.
 - **Tokens design fidèles** : `web/src/lib/tokens.ts` réplique `COLORS` de `screens.jsx`.
-- **Socket.io vs SSE** : Socket.io pour rétro-compat + reconnexion automatique.
+- **Sondage vs WebSocket** : Vercel n'accepte pas les WebSocket ; un sondage léger toutes les 4 s (onglet visible) suffit pour 7 postes.
 - **Adapter pattern Vision** : prêt à brancher GLM-OCR / Gemini / OpenAI sans toucher au code appelant.
 - **Soft-delete commandes** : `deletedAt` au lieu de DELETE physique.
 - **Permissions** : par middleware `requireAuth` + `requireRole('ADMIN')`.

@@ -1,14 +1,16 @@
-// EL BENNA LAB OS — Prisma schema (SQLite, V1)
-// Note: SQLite for zero-friction dev. For production, swap to PostgreSQL by changing
-// the provider and DATABASE_URL — the schema is compatible (no SQLite-only types used).
+// EL BENNA LAB OS — Prisma schema (PostgreSQL / Supabase)
+// DATABASE_URL = connexion "pooler" Supabase (port 6543, ?pgbouncer=true) — utilisée par l'application (fonctions Vercel).
+// DIRECT_URL   = connexion directe (port 5432) — utilisée par `prisma db push` (création des tables).
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ─── Core ────────────────────────────────────────────────────────────────────
@@ -318,4 +320,14 @@ model Absence {
 model Setting {
   key   String @id
   value String // JSON
+}
+
+// ─── Temps réel par rafraîchissement : le serveur note chaque évènement, les postes les relisent (GET /api/events)
+model Event {
+  id        Int      @id @default(autoincrement())
+  type      String
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

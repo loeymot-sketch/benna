@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth, requireRole, generateTicketCode } from '../auth.js';
 import { audit } from '../audit.js';
-import { emit } from '../io.js';
+import { emit } from '../events.js';
+import { fileUrl } from '../storage.js';
 
 const Statuses = ['RECUE','EN_ATTENTE','EN_COURS_DESIGN','VALIDATION_CLIENT','EN_PRODUCTION','EN_FINITION','PRETE','LIVREE','ANNULEE'] as const;
 const Urgencies = ['NORMAL','PRIORITAIRE','URGENT','EXPRESS'] as const;
@@ -38,11 +39,11 @@ export default async function ordersRoutes(app: FastifyInstance) {
     if (f.mine) where.assignedToId = req.user.sub;
     if (f.q) {
       where.OR = [
-        { ticketCode: { contains: f.q } },
-        { description: { contains: f.q } },
-        { pouchNumber: { contains: f.q } },
-        { customer: { fullName: { contains: f.q } } },
-        { customer: { phone: { contains: f.q } } },
+        { ticketCode: { contains: f.q, mode: 'insensitive' as const } },
+        { description: { contains: f.q, mode: 'insensitive' as const } },
+        { pouchNumber: { contains: f.q, mode: 'insensitive' as const } },
+        { customer: { fullName: { contains: f.q, mode: 'insensitive' as const } } },
+        { customer: { phone: { contains: f.q, mode: 'insensitive' as const } } },
       ];
     }
     const orders = await prisma.order.findMany({
@@ -80,7 +81,9 @@ export default async function ordersRoutes(app: FastifyInstance) {
       },
     });
     if (!order || order.deletedAt) return reply.code(404).send({ error: 'not_found' });
-    return { order };
+    // Liens d'accès (signés, temporaires) pour les pièces jointes
+    const attachments = await Promise.all(order.attachments.map(async (a) => ({ ...a, url: await fileUrl(a.path) })));
+    return { order: { ...order, attachments } };
   });
 
   app.post('/orders', { preHandler: requireAuth }, async (req) => {
@@ -163,7 +166,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
       entityType: 'Order', entityId: order.id, payload: { ticketCode },
     });
 
-    emit('order.created', { id: order.id, ticketCode: order.ticketCode });
+    await emit('order.created', { id: order.id, ticketCode: order.ticketCode });
     return { order };
   });
 
@@ -213,7 +216,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
       userId: req.user.sub, action: 'ORDER_UPDATED',
       entityType: 'Order', entityId: id, payload: data,
     });
-    emit('order.updated', { id });
+    await emit('order.updated', { id });
     return { order };
   });
 
@@ -237,7 +240,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
       userId: req.user.sub, action: 'ORDER_STATUS_CHANGED',
       entityType: 'Order', entityId: id, payload: { from: existing.status, to: status },
     });
-    emit('order.status_changed', { id, from: existing.status, to: status });
+    await emit('order.status_changed', { id, from: existing.status, to: status });
     return { order };
   });
 
@@ -272,7 +275,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
       userId: req.user.sub, action: 'PAYMENT_RECORDED',
       entityType: 'Order', entityId: id, payload: { amount: data.amount, method: data.method },
     });
-    emit('order.updated', { id });
+    await emit('order.updated', { id });
     return { order: order.updated, payment: order.payment };
   });
 
@@ -284,7 +287,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
       userId: req.user.sub, action: 'ORDER_DELETED',
       entityType: 'Order', entityId: id,
     });
-    emit('order.deleted', { id });
+    await emit('order.deleted', { id });
     return { ok: true };
   });
 

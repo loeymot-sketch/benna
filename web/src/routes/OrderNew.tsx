@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { shrinkImage } from '../lib/image';
 import { extractPouch, fieldsToVerify, FIELD_LABELS, type PouchExtraction } from '../lib/vision';
 import { Button, Card } from '../components/Atoms';
 import { COLORS, fmtTND } from '../lib/tokens';
@@ -83,7 +84,7 @@ export function OrderNewPage() {
       // Archive la photo de la pochette scannée comme pièce jointe (best effort).
       if (pouchFile) {
         const fd = new FormData();
-        fd.append('file', pouchFile);
+        fd.append('file', await shrinkImage(pouchFile));
         fd.append('kind', 'POUCH_SCAN');
         await api.post(`/orders/${r.data.order.id}/attachments`, fd).catch(() => {});
       }

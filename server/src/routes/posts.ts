@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { audit } from '../audit.js';
-import { emit } from '../io.js';
+import { emit } from '../events.js';
 import { toActWhere } from '../inbox.js';
 
 const PostTypes = ['HANDOFF','TASK','ABSENCE_NOTE','QUESTION','ANNOUNCEMENT','ALERT','NOTE','SHIFT_HANDOVER'] as const;
@@ -173,7 +173,7 @@ export default async function postsRoutes(app: FastifyInstance) {
       userId: req.user.sub, action: 'POST_CREATED',
       entityType: 'TeamPost', entityId: post.id, payload: { type: data.type, scope: data.scope },
     });
-    emit('post.created', {
+    await emit('post.created', {
       id: post.id, type: post.type, title: post.title, scope: post.scope, urgency: post.urgency,
       authorId: post.authorId, authorName: `${post.author.firstName} ${post.author.lastName}`.trim(),
       recipientUserId: post.recipientUserId, recipientRole: post.recipientRole, recipientShopId: post.recipientShopId,
@@ -205,7 +205,7 @@ export default async function postsRoutes(app: FastifyInstance) {
       userId: req.user.sub, action: 'POST_RESOLVED',
       entityType: 'TeamPost', entityId: id,
     });
-    emit('post.resolved', { id });
+    await emit('post.resolved', { id });
     return { post: updated };
   });
 
@@ -230,7 +230,7 @@ export default async function postsRoutes(app: FastifyInstance) {
       },
       include: { author: { select: { firstName: true, lastName: true } } },
     });
-    emit('post.replied', {
+    await emit('post.replied', {
       id, replyId: reply2.id, authorId: req.user.sub, authorName: `${reply2.author.firstName} ${reply2.author.lastName}`.trim(),
       parentAuthorId: parent.authorId, recipientUserId: parent.recipientUserId,
     });
@@ -248,7 +248,7 @@ export default async function postsRoutes(app: FastifyInstance) {
       update: {},
       create: { postId: id, userId: req.user.sub, emoji },
     });
-    emit('post.reacted', { id, emoji });
+    await emit('post.reacted', { id, emoji });
     return { reaction: r };
   });
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { apiUrl } from '../lib/config';
+import { shrinkImage } from '../lib/image';
 import { Card, StatusPill, UrgencyDot, Button, PostTypeChip, Avatar } from '../components/Atoms';
 import { COLORS, fmtTND, fmtDate, fmtDateTime, timeAgo, fmtPhone } from '../lib/tokens';
 import { getSocket } from '../lib/socket';
@@ -295,7 +296,7 @@ function AttachmentsTab({ order, onChange }: { order: any; onChange: () => void 
     const file = e.target.files?.[0];
     if (!file) return;
     const fd = new FormData();
-    fd.append('file', file);
+    fd.append('file', await shrinkImage(file));
     fd.append('kind', 'REFERENCE');
     await api.post(`/orders/${order.id}/attachments`, fd);
     onChange();
@@ -314,11 +315,11 @@ function AttachmentsTab({ order, onChange }: { order: any; onChange: () => void 
           const isImg = a.mimeType?.startsWith('image/');
           return (
             <a
-              key={a.id} href={apiUrl(a.path)} target="_blank" rel="noreferrer"
+              key={a.id} href={apiUrl(a.url)} target="_blank" rel="noreferrer"
               style={{ display: 'block', padding: 8, border: `1px solid ${COLORS.border}`, borderRadius: 8, textDecoration: 'none', color: COLORS.text }}
             >
               {isImg ? (
-                <img src={apiUrl(a.path)} style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 4 }} />
+                <img src={apiUrl(a.url)} style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 4 }} />
               ) : (
                 <div style={{ height: 110, background: COLORS.bg, borderRadius: 4, fontSize: 36 }} className="flex items-center justify-center">📄</div>
               )}

@@ -1,0 +1,45 @@
+{
+  "name": "elbenna-lab-os",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch server/src/index.ts",
+    "start": "NODE_ENV=production tsx server/src/index.ts",
+    "typecheck": "tsc --noEmit -p server/tsconfig.json",
+    "db:push": "prisma db push --skip-generate",
+    "db:studio": "prisma studio",
+    "db:seed-real": "tsx server/prisma/seed-real.ts",
+    "db:seed-demo": "tsx server/prisma/seed-demo.ts",
+    "db:init": "prisma db push --skip-generate && prisma generate && tsx server/prisma/seed-real.ts",
+    "build:api": "esbuild server/src/vercel.ts --bundle --platform=node --format=esm --target=node20 --external:@prisma/client --external:.prisma/client/default --banner:js=\"import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);\" --outfile=api/index.js",
+    "build": "prisma generate && npm run build:api && npm --prefix web run build"
+  },
+  "prisma": {
+    "schema": "server/prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/jwt": "^8.0.1",
+    "@fastify/multipart": "^8.3.0",
+    "@fastify/static": "^7.0.4",
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.6.1",
+    "fastify": "^4.28.1",
+    "qrcode": "^1.5.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.14.10",
+    "@types/qrcode": "^1.5.5",
+    "prisma": "^5.22.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3",
+    "esbuild": "^0.21.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
