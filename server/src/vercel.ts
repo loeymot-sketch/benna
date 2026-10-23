@@ -11,7 +11,7 @@ function diag() {
   const e = process.env;
   const info = (k: string) => { const v = e[k] ?? ''; return { present: v.length > 0, length: v.length, spacesOrQuotes: v !== v.trim() || /^["']|["']$/.test(v) }; };
   return {
-    deployment: { env: e.VERCEL_ENV, commit: (e.VERCEL_GIT_COMMIT_SHA ?? '').slice(0, 7), region: e.VERCEL_REGION, node: process.version },
+    deployment: { env: e.VERCEL_ENV, commit: (e.VERCEL_GIT_COMMIT_SHA ?? '').slice(0, 7), region: e.VERCEL_REGION, node: process.version, deploymentId: e.VERCEL_DEPLOYMENT_ID, url: e.VERCEL_URL, productionUrl: e.VERCEL_PROJECT_PRODUCTION_URL, branchUrl: e.VERCEL_BRANCH_URL },
     vars: { JWT_SECRET: info('JWT_SECRET'), DATABASE_URL: { ...info('DATABASE_URL'), looksLikePostgres: /^postgres(ql)?:\/\//.test(e.DATABASE_URL ?? '') }, PUBLIC_BASE_URL: info('PUBLIC_BASE_URL'), OPENROUTER_API_KEY: info('OPENROUTER_API_KEY') },
     namesSeen: Object.keys(e).filter((k) => /jwt|secret|database|supabase|openrouter|base_url|node_env/i.test(k)).sort(),
   };
