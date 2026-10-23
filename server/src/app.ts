@@ -2,7 +2,6 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
-import staticPlugin from '@fastify/static';
 
 import authRoutes from './routes/auth.js';
 import meRoutes from './routes/me.js';
@@ -17,7 +16,6 @@ import financeRoutes from './routes/finance.js';
 import absencesRoutes from './routes/absences.js';
 import uploadsRoutes from './routes/uploads.js';
 import eventsRoutes from './routes/events.js';
-import { UPLOAD_DIR, usesSupabase } from './storage.js';
 
 const PROD = process.env.NODE_ENV === 'production';
 
@@ -40,9 +38,6 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cors, { origin: ORIGINS, credentials: true });
   await app.register(jwt, { secret: secret || 'dev-secret-change-me' });
   await app.register(multipart, { limits: { fileSize: 12 * 1024 * 1024 } });
-
-  // Pièces jointes sur disque (développement uniquement) ; en production elles sont dans Supabase Storage
-  if (!usesSupabase()) await app.register(staticPlugin, { root: UPLOAD_DIR, prefix: '/uploads/', decorateReply: false });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 

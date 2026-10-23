@@ -331,3 +331,12 @@ model Event {
 
   @@index([createdAt])
 }
+
+// ─── Fichiers (photos de pochettes, pièces jointes) stockés dans Postgres quand Supabase Storage n'est pas configuré.
+// Table séparée d'Attachment pour ne jamais charger les octets en listant une commande.
+model FileBlob {
+  key       String   @id
+  data      Bytes
+  mimeType  String
+  createdAt DateTime @default(now())
+}

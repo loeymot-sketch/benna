@@ -54,23 +54,24 @@ Remettre 0000 à tous : `RESET_PINS=1 npm run db:seed-real`.
 2. *Project Settings → Database → Connection string* :
    - **Transaction pooler** (port 6543) → c'est `DATABASE_URL`, ajoute à la fin `?pgbouncer=true&connection_limit=1`
    - **Session pooler** (port 5432) → c'est `DIRECT_URL`
-3. *Storage → New bucket* : nom **`attachments`**, **Private** (décoché « Public »).
-4. *Project Settings → API* : `Project URL` → `SUPABASE_URL` ; clé **service_role** → `SUPABASE_SERVICE_KEY` (secrète : jamais dans le code ni dans le navigateur).
+3. *(Optionnel, plus tard)* Photos : par défaut elles sont stockées **dans la base** (aucune clé requise, ~1000 photos dans les 500 Mo gratuits).
+   Pour passer sur Supabase Storage : *Storage → New bucket* `attachments` (**Private**), puis *Project Settings → API Keys* : clé **secret** → `SUPABASE_SERVICE_KEY`
+   (+ `SUPABASE_URL`). La clé « publishable » n'est pas utilisée.
 
 ### 2. Créer les tables et les comptes (une seule fois, depuis ton Mac)
-Mets les 4 valeurs dans `.env` (modèle : `.env.example`), puis : `npm install && npm run db:init`
+Mets `DATABASE_URL` et `DIRECT_URL` dans `.env` (modèle : `.env.example`), puis : `npm install && npm run db:init`
 
 ### 3. Vercel (site + API)
 1. *Add New → Project* → importe le dépôt GitHub. **Root Directory : vide (racine du dépôt)**. Framework : *Other*.
    Le fichier `vercel.json` s'occupe du reste (build, dossier de sortie, routage).
-2. *Settings → Environment Variables* : `DATABASE_URL`, `JWT_SECRET` (`openssl rand -hex 32`), `SUPABASE_URL`,
-   `SUPABASE_SERVICE_KEY`, `SUPABASE_BUCKET=attachments`, `PUBLIC_BASE_URL` (l'adresse du site), `OPENROUTER_API_KEY`.
+2. *Settings → Environment Variables* : `DATABASE_URL`, `JWT_SECRET` (`openssl rand -hex 32`),
+   `PUBLIC_BASE_URL` (l'adresse du site), `OPENROUTER_API_KEY`.
    **Ne mets PAS** `VITE_API_URL`.
 3. *Deploy*. Puis ouvre l'adresse : 7 profils, code `0000`, **chaque admin change son code**.
 
 ### À savoir
 - Si tu modifies le code du serveur : `npm run build:api` régénère `api/index.js` (Vercel le refait aussi au build) — commite-le.
-- Photos : réduites à ~1800 px avant envoi (limite Vercel 4,5 Mo par requête).
+- Photos : stockées dans Postgres (lecture par lien signé d'1 h, réservé aux utilisateurs connectés) ; réduites à ~1800 px avant envoi (limite Vercel 4,5 Mo par requête).
 - Supabase gratuit met le projet en pause après ~1 semaine sans activité : un clic pour le relancer.
 - Vercel *Hobby* est réservé à un usage non commercial (conditions de Vercel).
 

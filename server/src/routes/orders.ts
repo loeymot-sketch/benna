@@ -5,6 +5,7 @@ import { requireAuth, requireRole, generateTicketCode } from '../auth.js';
 import { audit } from '../audit.js';
 import { emit } from '../events.js';
 import { fileUrl } from '../storage.js';
+import { signFile } from './uploads.js';
 
 const Statuses = ['RECUE','EN_ATTENTE','EN_COURS_DESIGN','VALIDATION_CLIENT','EN_PRODUCTION','EN_FINITION','PRETE','LIVREE','ANNULEE'] as const;
 const Urgencies = ['NORMAL','PRIORITAIRE','URGENT','EXPRESS'] as const;
@@ -82,7 +83,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
     });
     if (!order || order.deletedAt) return reply.code(404).send({ error: 'not_found' });
     // Liens d'accès (signés, temporaires) pour les pièces jointes
-    const attachments = await Promise.all(order.attachments.map(async (a) => ({ ...a, url: await fileUrl(a.path) })));
+    const attachments = await Promise.all(order.attachments.map(async (a) => ({ ...a, url: await fileUrl(a.path, (k) => signFile(app, k)) })));
     return { order: { ...order, attachments } };
   });
 
