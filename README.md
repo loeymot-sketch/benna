@@ -111,8 +111,9 @@ doit tourner ailleurs avec le `Dockerfile` (Railway, Fly.io, VPS…).
 `JWT_SECRET` (32+ car. aléatoires), `FRONTEND_ORIGIN=https://ton-site.vercel.app` (plusieurs adresses possibles, séparées par des virgules),
 `PUBLIC_BASE_URL=https://ton-site.vercel.app`, `OPENROUTER_API_KEY`. Note l'adresse publique de l'API (ex. `https://elbenna-api.up.railway.app`).
 
-**2. Vercel** — projet importé depuis le dépôt, puis *Settings → General* :
-- **Root Directory : `web`** (sans ça, Vercel ne trouve aucune page → erreur 404)
+**2. Vercel** — projet importé depuis le dépôt. Le `vercel.json` de la racine déclare **uniquement** le site (`web`) : l'API n'est volontairement PAS déployée sur Vercel
+(SQLite, photos et WebSocket n'y fonctionnent pas). Si Vercel propose d'ajouter un service « api », refuse. Alternative sans ce fichier : *Settings → General* :
+- **Root Directory : `web`**
 - Framework Preset : Vite (détecté via `web/vercel.json`)
 - *Environment Variables* : `VITE_API_URL=https://elbenna-api.up.railway.app` (adresse de l'API, sans `/` final)
 - puis **Redeploy** : la variable n'est lue qu'à la compilation.
