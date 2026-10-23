@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EL BENNA LAB OS — Système de gestion</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Caveat:wght@500;600;700&family=Cairo:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    html, body, #root { height: 100%; margin: 0; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; background: #f0eee9; color: #0f172a; -webkit-font-smoothing: antialiased; }
+    * { box-sizing: border-box; }
+    button { font-family: inherit; }
+    /* hide scrollbars inside artboards */
+    .ab-frame { overflow: hidden; }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="screens.jsx"></script>
+  <script type="text/babel" src="screen-login.jsx"></script>
+  <script type="text/babel" src="screen-dashboard.jsx"></script>
+  <script type="text/babel" src="screen-kanban-scan.jsx"></script>
+  <script type="text/babel" src="screen-detail-track.jsx"></script>
+  <script type="text/babel" src="screen-carnet.jsx"></script>
+  <script type="text/babel" src="screen-carnet-2.jsx"></script>
+  <script type="text/babel" src="screen-mobile.jsx"></script>
+  <script type="text/babel" src="screen-finals.jsx"></script>
+  <script type="text/babel" src="screen-ai-studio.jsx"></script>
+  <script type="text/babel">
+    const { useState } = React;
+
+    const Frame = ({ children, w = 1280, h = 800 }) => (
+      <div className="ab-frame" style={{ width: w, height: h, background: '#fff', position: 'relative', overflow: 'hidden' }}>
+        {children}
+      </div>
+    );
+
+    const App = () => (
+      <DesignCanvas
+        title="EL BENNA LAB OS"
+        subtitle="Système de gestion intégré · Labo Photo Numérique · Djerba"
+      >
+        <DCSection
+          id="ai-studio"
+          title="✨ Studio IA — améliorer, restaurer, générer (NOUVEAU)"
+          subtitle="Module desktop : drag-drop 1 à 1000 photos → upscale / restauration visage / denoise → livraison automatique. Génération d'images depuis prompt. Branché sur OpenAI (gpt-image-1) — Replicate optionnel pour Real-ESRGAN."
+        >
+          <DCArtboard id="ai-studio-main" label="① Studio IA · drag-drop + lot en cours + réglages" width={1440} height={900}>
+            <Frame w={1440} h={900}><AIStudio /></Frame>
+          </DCArtboard>
+          <DCArtboard id="ai-before-after" label="② Avant / Après · slider + détection visage + stats" width={1280} height={780}>
+            <Frame w={1280} h={780}><BeforeAfter /></Frame>
+          </DCArtboard>
+          <DCArtboard id="ai-generate" label="③ Génération IA · prompt → 4 variantes" width={1440} height={900}>
+            <Frame w={1440} h={900}><AIGenerate /></Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="overview"
+          title="🚀 Aperçu produit"
+          subtitle="Vue ensemble des 6 écrans clés — du scan IA de la pochette papier au tracking client"
+        >
+          <DCArtboard id="login" label="① Login PIN — accueil équipe" width={1280} height={800}>
+            <Frame w={1280} h={800}><LoginScreen /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="dashboard" label="② Dashboard temps réel" width={1280} height={800}>
+            <Frame w={1280} h={800}><Dashboard /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="kanban" label="③ Kanban — flux de production" width={1280} height={800}>
+            <Frame w={1280} h={800}><KanbanScreen /></Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="killer"
+          title="⚡ Killer feature — Scan IA de la pochette"
+          subtitle="Le réceptionniste prend en photo la pochette manuscrite, l'IA extrait tous les champs en 3 s · provider configurable (GLM-OCR / Gemini Flash / GPT-4o)"
+        >
+          <DCArtboard id="scan" label="④ Scan IA · pochette → formulaire" width={1280} height={800}>
+            <Frame w={1280} h={800}><ScanScreen /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="detail" label="⑤ Détail commande · timeline + carnet" width={1280} height={800}>
+            <Frame w={1280} h={800}><OrderDetailScreen /></Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="carnet"
+          title="📓 Le Carnet — Module Team Hub (Addendum #1)"
+          subtitle="Communication interne structurée : passations, tâches, alertes, absences — pas un chat, un carnet professionnel partagé entre les 2 boutiques"
+        >
+          <DCArtboard id="carnet-wall" label="① Mur du Carnet — vue équipe" width={1280} height={900}>
+            <Frame w={1280} h={900}><CarnetWall /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="pourmoi" label="② Pour Moi — inbox personnelle" width={1280} height={800}>
+            <Frame w={1280} h={800}><PourMoiScreen /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="composer" label="③ Création de post — type imposé" width={1024} height={780}>
+            <Frame w={1024} h={780}><ComposerScreen /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="post-detail" label="④ Détail post + thread + accusés de lecture" width={1280} height={900}>
+            <Frame w={1280} h={900}><PostDetailScreen /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="absences" label="⑤ Calendrier des absences" width={1280} height={800}>
+            <Frame w={1280} h={800}><AbsencesCalendar /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="order-carnet" label="⑥ Onglet Carnet sur la commande" width={1280} height={800}>
+            <Frame w={1280} h={800}><OrderCarnetTab /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="bell" label="⑦ Widget cloche — aperçu au survol" width={620} height={760}>
+            <Frame w={620} h={760}><BellWidget /></Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="mobile"
+          title="📱 Application mobile + tablette (PWA — pas de notif natives)"
+          subtitle="Web app installée sur l'écran d'accueil. Hero : bouton SCAN POCHETTE permanent en bas — c'est l'usage principal sur mobile. Code PIN par utilisateur. Vue ÉQUIPE = pas d'argent / pas de stats. Vue ADMIN = caisse, marges, alertes."
+        >
+          <DCArtboard id="m-login" label="① Login — choix utilisateur" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><MobileLogin /></PhoneFrame>
+          </DCArtboard>
+
+          <DCArtboard id="m-pin" label="② PIN — code à 6 chiffres" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><MobilePIN /></PhoneFrame>
+          </DCArtboard>
+
+          <DCArtboard id="m-home-team" label="③ Accueil ÉQUIPE — Karim (sans argent)" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><MobileHomeTeam /></PhoneFrame>
+          </DCArtboard>
+
+          <DCArtboard id="m-home-admin" label="④ Accueil ADMIN — Adel (suivi équipe & commandes — PAS de caisse)" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><MobileHomeAdmin /></PhoneFrame>
+          </DCArtboard>
+
+          <DCArtboard id="m-scan-cam" label="⑤ Scanner pochette — caméra" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><MobileScanCam /></PhoneFrame>
+          </DCArtboard>
+
+          <DCArtboard id="m-scan-result" label="⑥ Scan résultat — bottom sheet" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><MobileScanResult /></PhoneFrame>
+          </DCArtboard>
+
+          <DCArtboard id="m-carnet" label="⑦ Carnet mobile — Pour moi" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><MobileCarnet /></PhoneFrame>
+          </DCArtboard>
+
+          <DCArtboard id="m-order" label="⑧ Détail commande mobile" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><MobileOrderDetail /></PhoneFrame>
+          </DCArtboard>
+
+          <DCArtboard id="tablet" label="⑨ Tablette — accueil + bouton SCAN flottant" width={1180} height={820}>
+            <Frame w={1180} h={820}><TabletHome /></Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="client-wa"
+          title="📲 Notification client + WhatsApp + page de suivi"
+          subtitle="Quand une commande passe en PRÊTE, l'équipe peut prévenir le client en 1 clic via WhatsApp (avec QR de suivi joint). Le client n'a pas de compte — il scanne le QR sur le reçu et voit sa page perso."
+        >
+          <DCArtboard id="ready-confirm" label="① Validation PRÊTE — propose notify" width={620} height={620}>
+            <Frame w={620} h={620}><ReadyConfirm /></Frame>
+          </DCArtboard>
+          <DCArtboard id="wa-modal" label="② Modale WhatsApp — aperçu message + envoi" width={820} height={620}>
+            <Frame w={820} h={620}><WANotifyModal /></Frame>
+          </DCArtboard>
+          <DCArtboard id="client-page" label="③ Page client publique (QR scanné)" width={420} height={812}>
+            <PhoneFrame w={390} h={780}><ClientTracking /></PhoneFrame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="admin-team"
+          title="👥 Administration — gestion équipe & permissions"
+          subtitle="Adel ajoute, désactive, modifie les permissions. Chaque membre crée son PIN à la 1ère connexion (Adel ne le voit jamais — il peut juste le réinitialiser)."
+        >
+          <DCArtboard id="team" label="① Annuaire équipe — vue admin" width={1280} height={820}>
+            <Frame w={1280} h={820}><TeamManagement /></Frame>
+          </DCArtboard>
+          <DCArtboard id="add-member" label="② Ajouter un membre — permissions granulaires" width={620} height={760}>
+            <Frame w={620} h={760}><AddMember /></Frame>
+          </DCArtboard>
+          <DCArtboard id="first-login" label="③ Onboarding — Imen définit son PIN" width={400} height={812}>
+            <PhoneFrame w={390} h={780}><FirstLogin /></PhoneFrame>
+          </DCArtboard>
+          <DCArtboard id="declare-absence" label="④ Déclarer absence + remplaçant + auto-réassignation" width={620} height={680}>
+            <Frame w={620} h={680}><DeclareAbsence /></Frame>
+          </DCArtboard>
+          <DCArtboard id="empty-carnet" label="⑤ Empty state — Carnet vide" width={1280} height={780}>
+            <Frame w={1280} h={780}><EmptyCarnet /></Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="customer"
+          title="👤 Côté client — page publique de suivi"
+          subtitle="Le client scanne le QR sur son reçu thermique ou suit le lien SMS · responsive mobile, multi-langue FR/AR"
+        >
+          <DCArtboard id="tracking" label="⑥ Page tracking publique (mobile)" width={420} height={760}>
+            <Frame w={420} h={760}><TrackingScreen /></Frame>
+          </DCArtboard>
+
+          <DCArtboard id="legend" label="Légende — couleurs métier" width={420} height={760}>
+            <div style={{ width: 420, height: 760, background: '#fff', padding: 28, fontFamily: '"Inter",sans-serif', overflow: 'auto' }}>
+              <Logo size={32} />
+              <div style={{ marginTop: 24, fontSize: 13, color: '#64748b', lineHeight: 1.55 }}>
+                Charte visuelle inspirée du logo papier : bleu marine "Labo Photo Numérique" + rouge "EL BENNA". Les couleurs de statut et d'urgence sont conçues pour la lecture périphérique (coup d'œil rapide depuis le poste de travail).
+              </div>
+
+              <div style={{ marginTop: 22, fontSize: 11, fontWeight: 700, color: '#0f172a', letterSpacing: 0.5 }}>NIVEAUX D'URGENCE</div>
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[
+                  { l: 'NORMAL', d: 'délai standard', u: 'NORMAL' },
+                  { l: 'PRIORITAIRE', d: 'à anticiper', u: 'PRIORITAIRE' },
+                  { l: 'URGENT', d: 'sous 24 h', u: 'URGENT' },
+                  { l: 'EXPRESS', d: 'le jour même', u: 'EXPRESS' },
+                ].map(x => (
+                  <div key={x.l} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, padding: '6px 10px', background: '#f7f7f5', borderRadius: 8 }}>
+                    <UrgencyDot level={x.u} />
+                    <span style={{ fontWeight: 700, flex: '0 0 90px' }}>{x.l}</span>
+                    <span style={{ color: '#64748b' }}>{x.d}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: 22, fontSize: 11, fontWeight: 700, color: '#0f172a', letterSpacing: 0.5 }}>STATUTS COMMANDE</div>
+              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {['RECUE','EN_COURS_DESIGN','VALIDATION_CLIENT','EN_PRODUCTION','PRETE','LIVREE','ANNULEE'].map(s => (
+                  <StatusPill key={s} status={s} />
+                ))}
+              </div>
+
+              <div style={{ marginTop: 22, fontSize: 11, fontWeight: 700, color: '#0f172a', letterSpacing: 0.5 }}>RÔLES & PIN</div>
+              <div style={{ marginTop: 8, fontSize: 12, color: '#64748b', lineHeight: 1.7 }}>
+                <div>• <b style={{ color: '#0f172a' }}>Admin</b> — PIN 6 chiffres · accès total</div>
+                <div>• <b style={{ color: '#0f172a' }}>Réception</b> — PIN 4 chiffres · création/caisse</div>
+                <div>• <b style={{ color: '#0f172a' }}>Designer</b> — PIN 4 chiffres · maquettes</div>
+                <div>• <b style={{ color: '#0f172a' }}>Production</b> — PIN 4 chiffres · impression/sublim.</div>
+                <div>• <b style={{ color: '#0f172a' }}>Photographe</b> — PIN 4 chiffres · studio</div>
+              </div>
+
+              <div style={{ marginTop: 22, fontSize: 11, fontWeight: 700, color: '#0f172a', letterSpacing: 0.5 }}>FORMAT TICKET</div>
+              <div style={{ marginTop: 6, fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 14, color: '#1e3a8a', fontWeight: 700, padding: '8px 12px', background: '#eff6ff', borderRadius: 8, display: 'inline-block' }}>
+                LB-YYYYMM-XXXX
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: '#94a3b8' }}>Pochette papier conservée comme référence : <b style={{ color: '#0f172a' }}>0061340</b></div>
+            </div>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
