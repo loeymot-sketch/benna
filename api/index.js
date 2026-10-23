@@ -57589,6 +57589,17 @@ async function buildApp() {
   await app.register(import_jwt.default, { secret: secret || "dev-secret-change-me" });
   await app.register(import_multipart.default, { limits: { fileSize: 12 * 1024 * 1024 } });
   app.get("/health", async () => ({ ok: true, ts: (/* @__PURE__ */ new Date()).toISOString() }));
+  app.get("/api/health", async (_req, reply) => {
+    const present = (k) => !!(process.env[k] ?? "").trim();
+    const env = { DATABASE_URL: present("DATABASE_URL"), JWT_SECRET: (process.env.JWT_SECRET ?? "").length >= 32, PUBLIC_BASE_URL: present("PUBLIC_BASE_URL"), OPENROUTER_API_KEY: present("OPENROUTER_API_KEY") };
+    let db = "ok";
+    try {
+      await prisma.$queryRaw`select 1`;
+    } catch (e) {
+      db = String(e?.message ?? e).split("\n").filter(Boolean).slice(-1)[0].slice(0, 200);
+    }
+    return reply.code(db === "ok" ? 200 : 503).send({ ok: db === "ok", env, db, node: process.version });
+  });
   await app.register(async (api) => {
     await api.register(authRoutes);
     await api.register(meRoutes);
@@ -57610,15 +57621,22 @@ async function buildApp() {
 // server/src/vercel.ts
 var ready = null;
 async function handler(req, res) {
-  ready ??= buildApp().then(async (a) => {
-    await a.ready();
-    return a;
-  }).catch((e) => {
-    ready = null;
-    throw e;
-  });
-  const app = await ready;
-  app.server.emit("request", req, res);
+  try {
+    ready ??= buildApp().then(async (a) => {
+      await a.ready();
+      return a;
+    }).catch((e) => {
+      ready = null;
+      throw e;
+    });
+    const app = await ready;
+    app.server.emit("request", req, res);
+  } catch (e) {
+    console.error("startup failed", e);
+    res.statusCode = 500;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ error: "startup_failed", message: String(e?.message ?? e).split("\n")[0].slice(0, 300) }));
+  }
 }
 export {
   handler as default

@@ -16,6 +16,7 @@ import financeRoutes from './routes/finance.js';
 import absencesRoutes from './routes/absences.js';
 import uploadsRoutes from './routes/uploads.js';
 import eventsRoutes from './routes/events.js';
+import { prisma } from './db.js';
 
 const PROD = process.env.NODE_ENV === 'production';
 
@@ -40,6 +41,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(multipart, { limits: { fileSize: 12 * 1024 * 1024 } });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+
+  // Diagnostic de configuration (aucune valeur secrète : seulement « présente / absente » + état de la base)
+  app.get('/api/health', async (_req, reply) => {
+    const present = (k: string) => !!(process.env[k] ?? '').trim();
+    const env = { DATABASE_URL: present('DATABASE_URL'), JWT_SECRET: (process.env.JWT_SECRET ?? '').length >= 32, PUBLIC_BASE_URL: present('PUBLIC_BASE_URL'), OPENROUTER_API_KEY: present('OPENROUTER_API_KEY') };
+    let db: string = 'ok';
+    try { await prisma.$queryRaw`select 1`; } catch (e: any) { db = String(e?.message ?? e).split('\n').filter(Boolean).slice(-1)[0].slice(0, 200); }
+    return reply.code(db === 'ok' ? 200 : 503).send({ ok: db === 'ok', env, db, node: process.version });
+  });
 
   // Toute l'API vit sous /api : les adresses sans préfixe (/orders/12, /track/LB-…) restent celles des pages du site.
   await app.register(async (api) => {
