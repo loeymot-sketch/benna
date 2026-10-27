@@ -12,6 +12,7 @@ type UserSummary = {
 
 export function LoginPage() {
   const [users, setUsers] = useState<UserSummary[]>([]);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [picked, setPicked] = useState<UserSummary | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +24,12 @@ export function LoginPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get('/auth/users').then((r) => setUsers(r.data.users)).catch(() => {});
+    api.get('/auth/users')
+      .then((r) => { setUsers(r.data.users); setApiError(null); })
+      .catch((e) => {
+        const d = e.response?.data;
+        setApiError(d?.message ?? d?.error ?? 'Le serveur ne répond pas (API injoignable).');
+      });
   }, []);
 
   // Clavier physique (PC de la réception) : chiffres, Retour arrière, Échap
@@ -110,7 +116,7 @@ export function LoginPage() {
     }
   }, [pin, setupPin2, setupStep]);
 
-  if (!picked) return <UserPicker users={users} onPick={(u) => {
+  if (!picked) return <UserPicker users={users} apiError={apiError} onPick={(u) => {
     setPicked(u);
     setSetupMode(!u.pinSet);
     setError(u.pinSet ? null : 'Première connexion : choisis ton code PIN.');
@@ -228,12 +234,18 @@ export function LoginPage() {
   );
 }
 
-function UserPicker({ users, onPick }: { users: UserSummary[]; onPick: (u: UserSummary) => void }) {
+function UserPicker({ users, apiError, onPick }: { users: UserSummary[]; apiError: string | null; onPick: (u: UserSummary) => void }) {
   return (
     <div className="h-full flex flex-col items-center justify-center" style={{ background: COLORS.bg, padding: 32 }}>
       <Logo size={36} />
       <div style={{ marginTop: 24, fontSize: 22, fontWeight: 700 }}>Qui es-tu ?</div>
       <div style={{ marginTop: 6, fontSize: 13, color: COLORS.muted }}>Sélectionne ton profil pour saisir ton PIN.</div>
+      {apiError && (
+        <div role="alert" style={{ marginTop: 20, maxWidth: 560, padding: '12px 16px', borderRadius: 12, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: 13, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Le serveur n'a pas pu démarrer</div>
+          {apiError}
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-8" style={{ maxWidth: 720, padding: '0 16px' }}>
         {users.map((u) => (
           <button

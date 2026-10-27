@@ -6,6 +6,7 @@ web/dist/
 
 # Secrets et données : ne jamais versionner
 .env
+server/production.env
 data/uploads/*
 !data/uploads/.gitkeep
 backups/

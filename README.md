@@ -64,10 +64,15 @@ Mets `DATABASE_URL` et `DIRECT_URL` dans `.env` (modèle : `.env.example`), puis
 ### 3. Vercel (site + API)
 1. *Add New → Project* → importe le dépôt GitHub. **Root Directory : vide (racine du dépôt)**. Framework : *Other*.
    Le fichier `vercel.json` s'occupe du reste (build, dossier de sortie, routage).
-2. *Settings → Environment Variables* : `DATABASE_URL`, `JWT_SECRET` (`openssl rand -hex 32`),
-   `PUBLIC_BASE_URL` (l'adresse du site), `OPENROUTER_API_KEY`.
-   **Ne mets PAS** `VITE_API_URL`.
-3. *Deploy*. Puis ouvre l'adresse : 7 profils, code `0000`, **chaque admin change son code**.
+2. *Settings → Environment Variables* → environnement **Production** (pas « Development ») :
+   - **`DATABASE_URL`** — la seule variable indispensable (adresse « Transaction pooler » Supabase, voir étape 1).
+   - Optionnel : `OPENROUTER_API_KEY` (scan IA ; sans clé = mode démo). `JWT_SECRET` et `PUBLIC_BASE_URL` ne sont plus
+     nécessaires : le secret de session est généré une fois et gardé en base, l'adresse publique est déduite de Vercel.
+   - **Ne mets PAS** `VITE_API_URL`.
+3. *Deploy* (ou *Redeploy* après avoir ajouté une variable : elles ne s'appliquent qu'aux nouveaux déploiements).
+   Puis ouvre l'adresse : 7 profils, code `0000`, **chaque admin change son code**.
+4. Vérifier : `https://ton-site.vercel.app/api/health` doit répondre `"ok": true`. Sinon la page de connexion
+   affiche en rouge la variable manquante, et `/api/diag` montre ce que reçoit la fonction (jamais les valeurs).
 
 ### À savoir
 - Si tu modifies le code du serveur : `npm run build:api` régénère `api/index.js` (Vercel le refait aussi au build) — commite-le.

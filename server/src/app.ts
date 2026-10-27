@@ -16,19 +16,20 @@ import financeRoutes from './routes/finance.js';
 import absencesRoutes from './routes/absences.js';
 import uploadsRoutes from './routes/uploads.js';
 import eventsRoutes from './routes/events.js';
+import './config.js';
 import { prisma } from './db.js';
-
-const PROD = process.env.NODE_ENV === 'production';
+import { PROD, hasDatabaseUrl } from './config.js';
+import { resolveJwtSecret } from './secret.js';
 
 // Construit l'application SANS l'écouter : utilisée par le serveur local (index.ts)
 // et par la fonction Vercel (vercel.ts).
 export async function buildApp(): Promise<FastifyInstance> {
-  // En production on refuse de démarrer avec un secret de développement : il permettrait de
-  // fabriquer des jetons de connexion (donc des sessions admin) valables 30 jours.
-  const secret = process.env.JWT_SECRET ?? '';
-  if (PROD && (secret.length < 32 || /change|dev-secret|dev_secret/i.test(secret))) {
-    throw new Error('JWT_SECRET absent ou faible. Génère-en un : openssl rand -hex 32');
+  // Seule variable indispensable : l'adresse de la base. Message explicite plutôt qu'une erreur Prisma obscure.
+  if (!hasDatabaseUrl()) {
+    throw new Error('DATABASE_URL absente. Vercel → projet → Settings → Environment Variables → Production → DATABASE_URL (adresse « Transaction pooler » Supabase), puis Redeploy.');
   }
+  // Secret de session : variable JWT_SECRET si présente, sinon généré une fois et gardé en base (voir secret.ts).
+  const secret = await resolveJwtSecret();
 
   // trustProxy : derrière le proxy de l'hébergeur, req.ip = vraie IP du client (journal d'audit)
   const app = Fastify({ logger: { level: 'info' }, trustProxy: PROD });
@@ -37,7 +38,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // plusieurs adresses possibles, séparées par des virgules
   const ORIGINS = [...FRONTEND_ORIGIN.split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean), 'http://localhost:5173', 'http://127.0.0.1:5173'];
   await app.register(cors, { origin: ORIGINS, credentials: true });
-  await app.register(jwt, { secret: secret || 'dev-secret-change-me' });
+  await app.register(jwt, { secret });
   await app.register(multipart, { limits: { fileSize: 12 * 1024 * 1024 } });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
@@ -45,7 +46,13 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Diagnostic de configuration (aucune valeur secrète : seulement « présente / absente » + état de la base)
   app.get('/api/health', async (_req, reply) => {
     const present = (k: string) => !!(process.env[k] ?? '').trim();
-    const env = { DATABASE_URL: present('DATABASE_URL'), JWT_SECRET: (process.env.JWT_SECRET ?? '').length >= 32, PUBLIC_BASE_URL: present('PUBLIC_BASE_URL'), OPENROUTER_API_KEY: present('OPENROUTER_API_KEY') };
+    const env = {
+      DATABASE_URL: present('DATABASE_URL'),
+      JWT_SECRET: present('JWT_SECRET') ? 'variable' : 'généré en base',
+      PUBLIC_BASE_URL: process.env.PUBLIC_BASE_URL ?? null,
+      OPENROUTER_API_KEY: present('OPENROUTER_API_KEY'),
+      fallbackFile: process.env.CONFIG_FALLBACK_FILE ?? null,
+    };
     let db: string = 'ok';
     try { await prisma.$queryRaw`select 1`; } catch (e: any) { db = String(e?.message ?? e).split('\n').filter(Boolean).slice(-1)[0].slice(0, 200); }
     return reply.code(db === 'ok' ? 200 : 503).send({ ok: db === 'ok', env, db, node: process.version });

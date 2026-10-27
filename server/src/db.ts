@@ -1,4 +1,5 @@
 // Import par défaut : le paquet est en CommonJS, l'import nommé échoue dans la fonction Vercel (ESM)
+import './config.js';
 import prismaPkg from '@prisma/client';
 const { PrismaClient } = prismaPkg;
 
