@@ -120,6 +120,7 @@ model Order {
   plannedNote     String?    // précision libre (ex. « après-midi »)
   notifyMode      String     @default("NONE") // NONE | CALL | WHATSAPP : choix du client pour être prévenu quand c'est prêt
   notifyPhone     String?    // numéro donné par le client sur la page de suivi (si absent de la fiche)
+  trackKey        String?    // secret du lien de suivi (dans le QR) : sans lui, la page publique reste minimale
   notifyRequestedAt DateTime?
   notifiedAt      DateTime?  // quand l'équipe a prévenu le client (appel / WhatsApp)
   deliveryDate    DateTime

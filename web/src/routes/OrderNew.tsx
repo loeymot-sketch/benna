@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { shrinkImage } from '../lib/image';
 import { extractPouch, fieldsToVerify, FIELD_LABELS, type PouchExtraction } from '../lib/vision';
 import { Button, Card } from '../components/Atoms';
-import { COLORS, fmtTND, fullName } from '../lib/tokens';
+import { COLORS, fmtTND, fullName, localISODate } from '../lib/tokens';
 import { useAuth } from '../store/auth';
 
 export function OrderNewPage() {
@@ -57,7 +57,7 @@ export function OrderNewPage() {
       setCatalog(c.data.items);
       if (s.data.shops[0]) setShopId(me?.shopId ?? s.data.shops[0].id);
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-      setDeliveryDate(tomorrow.toISOString().slice(0, 10));
+      setDeliveryDate(localISODate(tomorrow));
     });
   }, [me?.shopId]);
 
@@ -65,6 +65,8 @@ export function OrderNewPage() {
     e.preventDefault();
     setError(null);
     if (!description.trim()) return setError('Description obligatoire');
+    const phoneDigits = customerPhone.replace(/\D/g, '').length;
+    if (phoneDigits > 0 && phoneDigits < 8) return setError('GSM incomplet : complète-le ou laisse le champ vide.');
     if (totalAmount <= 0) return setError('Montant total > 0');
     setSubmitting(true);
     try {
@@ -93,7 +95,8 @@ export function OrderNewPage() {
       }
       navigate(`/orders/${r.data.order.id}`);
     } catch (e: any) {
-      setError(e.response?.data?.error ?? 'Erreur');
+      const code = e.response?.data?.error;
+      setError(code === 'invalid_phone' ? 'GSM incomplet : complète-le ou laisse le champ vide.' : (typeof code === 'string' ? code : 'Erreur'));
     } finally {
       setSubmitting(false);
     }

@@ -170,7 +170,7 @@ export function CashPage() {
         {data.unpaid.orders.map((o: any) => (
           <div key={o.id} className="flex items-center gap-3 flex-wrap" style={{ padding: '12px 18px', borderBottom: `1px solid ${COLORS.border}` }}>
             <Link to={`/orders/${o.id}`} style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, color: COLORS.primary, fontWeight: 700, width: 130 }}>{o.ticketCode}</Link>
-            <div className="flex-1" style={{ fontSize: 13, minWidth: 120 }}>{clientName(o.customer)} <span style={{ color: COLORS.muted }}>· {fmtPhone(o.customer?.phone ?? '')}</span></div>
+            <div className="flex-1" style={{ fontSize: 13, minWidth: 120 }}>{clientName(o.customer)} {o.customer?.phone && <span style={{ color: COLORS.muted }}>· {fmtPhone(o.customer.phone)}</span>}</div>
             <div style={{ fontSize: 11, color: COLORS.muted }}>livraison {fmtDate(o.deliveryDate)}</div>
             <div style={{ fontWeight: 700, color: COLORS.danger }}>{fmtTND(o.due)}</div>
           </div>

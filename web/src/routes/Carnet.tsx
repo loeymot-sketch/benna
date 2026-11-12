@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, PostTypeChip, Avatar, Button } from '../components/Atoms';
-import { COLORS, POST_TYPE_META, timeAgo, fmtDateTime, fullName } from '../lib/tokens';
+import { COLORS, POST_TYPE_META, timeAgo, fmtDateTime, fullName, clientName } from '../lib/tokens';
 import { useAuth } from '../store/auth';
 import { getSocket } from '../lib/socket';
 
@@ -157,7 +157,7 @@ function PostCard({ post, onClick }: { post: any; onClick: () => void }) {
               borderRadius: 6, fontSize: 11, color: COLORS.primary, fontWeight: 600,
               fontFamily: 'ui-monospace,Menlo,monospace',
             }}>
-              📦 {post.order.ticketCode} — {post.order.customer?.fullName}
+              📦 {post.order.ticketCode} — {clientName(post.order.customer)}
             </div>
           )}
           {post._count?.replies > 0 && (
@@ -333,7 +333,7 @@ export function ComposerPage() {
               style={{ marginTop: 4, width: '100%', height: 38, padding: '0 12px', borderRadius: 8, border: `1px solid ${COLORS.border}`, fontSize: 14 }}
             >
               <option value="">— Aucune —</option>
-              {orders.map((o) => <option key={o.id} value={o.id}>{o.ticketCode} — {o.customer.fullName}</option>)}
+              {orders.map((o) => <option key={o.id} value={o.id}>{o.ticketCode} — {clientName(o.customer)}</option>)}
             </select>
           </div>
 
@@ -442,7 +442,7 @@ export function PostDetailPage() {
               fontFamily: 'ui-monospace,Menlo,monospace',
             }}
           >
-            📦 {post.order.ticketCode} — {post.order.customer?.fullName}
+            📦 {post.order.ticketCode} — {clientName(post.order.customer)}
           </Link>
         )}
 

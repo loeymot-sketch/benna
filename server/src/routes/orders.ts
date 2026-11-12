@@ -6,9 +6,12 @@ import { audit } from '../audit.js';
 import { emit } from '../events.js';
 import { fileUrl } from '../storage.js';
 import { signFile } from './uploads.js';
+import crypto from 'node:crypto';
+import QRCode from 'qrcode';
 
 const Statuses = ['RECUE','EN_ATTENTE','EN_COURS_DESIGN','VALIDATION_CLIENT','EN_PRODUCTION','EN_FINITION','PRETE','LIVREE','ANNULEE'] as const;
 const Urgencies = ['NORMAL','PRIORITAIRE','URGENT','EXPRESS'] as const;
+const DateStr = z.string().refine((v) => !isNaN(new Date(v).getTime()), 'invalid_date');
 const NotifyModes = ['NONE','CALL','WHATSAPP'] as const;
 const PaymentStatuses = ['IMPAYE','ACOMPTE','PAYE'] as const;
 const PaymentMethods = ['ESPECES','CARTE','VIREMENT','CHEQUE','D17','EDINAR','AUTRE'] as const;
@@ -48,6 +51,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
         { pouchNumber: { contains: f.q, mode: 'insensitive' as const } },
         { customer: { fullName: { contains: f.q, mode: 'insensitive' as const } } },
         { customer: { phone: { contains: f.q, mode: 'insensitive' as const } } },
+        { notifyPhone: { contains: f.q, mode: 'insensitive' as const } },
       ];
     }
     const orders = await prisma.order.findMany({
@@ -58,7 +62,8 @@ export default async function ordersRoutes(app: FastifyInstance) {
         services: { include: { service: true } },
       },
     });
-    return { orders };
+    // Le secret du lien de suivi ne sort que par /orders/:id/qr (le personnel de production n'a pas à le connaître).
+    return { orders: orders.map(({ trackKey: _k, ...o }) => o) };
   });
 
   app.get('/orders/:id', { preHandler: requireAuth }, async (req, reply) => {
@@ -87,7 +92,8 @@ export default async function ordersRoutes(app: FastifyInstance) {
     if (!order || order.deletedAt) return reply.code(404).send({ error: 'not_found' });
     // Liens d'accès (signés, temporaires) pour les pièces jointes
     const attachments = await Promise.all(order.attachments.map(async (a) => ({ ...a, url: await fileUrl(a.path, (k) => signFile(app, k)) })));
-    return { order: { ...order, attachments } };
+    const { trackKey: _k, ...safe } = order;
+    return { order: { ...safe, attachments } };
   });
 
   app.post('/orders', { preHandler: requireAuth }, async (req) => {
@@ -100,7 +106,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
       paidAmount: z.number().nonnegative().default(0),
       discountAmount: z.number().nonnegative().default(0),
       urgency: z.enum(Urgencies).default('NORMAL'),
-      deliveryDate: z.string(),
+      deliveryDate: DateStr,
       deliveryTime: z.string().optional().nullable(),
       internalNotes: z.string().optional().nullable(),
       assignedToId: z.string().optional().nullable(),
@@ -144,6 +150,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
         deliveryDate: new Date(data.deliveryDate),
         deliveryTime: data.deliveryTime ?? null,
         internalNotes: data.internalNotes ?? null,
+        trackKey: crypto.randomBytes(8).toString('hex'),
         notifyMode: data.notifyMode ?? 'NONE',
         notifyRequestedAt: data.notifyMode && data.notifyMode !== 'NONE' ? new Date() : null,
         createdById: req.user.sub,
@@ -184,13 +191,13 @@ export default async function ordersRoutes(app: FastifyInstance) {
       totalAmount: z.number().nonnegative().optional(),
       discountAmount: z.number().nonnegative().optional(),
       urgency: z.enum(Urgencies).optional(),
-      deliveryDate: z.string().optional(),
+      deliveryDate: DateStr.optional(),
       deliveryTime: z.string().nullable().optional(),
       internalNotes: z.string().nullable().optional(),
       assignedToId: z.string().nullable().optional(),
       pouchNumber: z.string().nullable().optional(),
       productionSubStatus: z.string().nullable().optional(),
-      plannedFor: z.string().nullable().optional(),
+      plannedFor: DateStr.nullable().optional(),
       plannedNote: z.string().nullable().optional(),
       notifyMode: z.enum(NotifyModes).optional(),
       notifyPhone: z.string().nullable().optional(),
@@ -202,6 +209,11 @@ export default async function ordersRoutes(app: FastifyInstance) {
 
     const updateData: any = { ...data };
     if (data.deliveryDate) updateData.deliveryDate = new Date(data.deliveryDate);
+    if (data.notifyPhone !== undefined) {
+      const d = (data.notifyPhone ?? '').replace(/\D/g, '');
+      if (d.length > 0 && d.length < 8) return reply.code(400).send({ error: 'invalid_phone' });
+      updateData.notifyPhone = d.length < 8 ? null : d.startsWith('216') ? `+${d}` : d.length === 8 ? `+216${d}` : `+${d}`;
+    }
     if (data.plannedFor !== undefined) updateData.plannedFor = data.plannedFor ? new Date(data.plannedFor) : null;
     if (data.notifyMode !== undefined) updateData.notifyRequestedAt = data.notifyMode === 'NONE' ? null : new Date();
     if (data.totalAmount !== undefined || data.discountAmount !== undefined) {
@@ -237,7 +249,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const Body = z.object({
       status: z.enum(Statuses), comment: z.string().optional(),
-      plannedFor: z.string().nullable().optional(), // « prévu pour » la nouvelle étape
+      plannedFor: DateStr.nullable().optional(), // « prévu pour » la nouvelle étape
       plannedNote: z.string().nullable().optional(),
     });
     const { status, comment, plannedFor, plannedNote } = Body.parse(req.body);
@@ -263,14 +275,17 @@ export default async function ordersRoutes(app: FastifyInstance) {
           status,
           plannedFor: plannedFor ? new Date(plannedFor) : null, // une nouvelle étape repart sans date annoncée
           plannedNote: plannedNote ?? null,
-          ...(status === 'PRETE' ? { notifiedAt: null } : {}),
         },
         include: { customer: true },
       });
       // Client qui veut être prévenu : on garde une trace « à envoyer » (WhatsApp automatique plus tard).
       if (status === 'PRETE' && existing.notifyMode !== 'NONE') {
         const recipient = existing.notifyPhone ?? updated.customer.phone ?? '';
-        await tx.notification.create({ data: {
+        // Pas de doublon (PRETE → autre → PRETE) et pas de notification sans destinataire.
+        const already = await tx.notification.count({ where: { orderId: id, status: 'PENDING' } });
+        // Retour en « Prête » après un client déjà prévenu : il faut le prévenir de nouveau.
+        if (recipient && !already && existing.notifiedAt) await tx.order.update({ where: { id }, data: { notifiedAt: null } });
+        if (recipient && !already) await tx.notification.create({ data: {
           orderId: id, channel: existing.notifyMode, recipient,
           message: `Votre commande ${existing.ticketCode} est prête.`, status: 'PENDING',
         } });
@@ -285,13 +300,32 @@ export default async function ordersRoutes(app: FastifyInstance) {
     return { order };
   });
 
+  // Lien de suivi complet (avec le secret) + QR, réservé à l'équipe. Crée le secret des anciennes commandes à la demande.
+  app.get('/orders/:id/qr', { preHandler: requireAuth }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { base } = (req.query ?? {}) as { base?: string };
+    const order = await prisma.order.findUnique({ where: { id } });
+    if (!order || order.deletedAt) return reply.code(404).send({ error: 'not_found' });
+    let trackKey = order.trackKey;
+    if (!trackKey) {
+      // deux appels simultanés ne doivent pas produire deux secrets : seul le premier écrit, l'autre relit.
+      await prisma.order.updateMany({ where: { id, trackKey: null }, data: { trackKey: crypto.randomBytes(8).toString('hex') } });
+      trackKey = (await prisma.order.findUnique({ where: { id }, select: { trackKey: true } }))!.trackKey!;
+    }
+    const origin = (/^https?:\/\/[^/\s]+$/.test(base ?? '') ? base! : (process.env.PUBLIC_BASE_URL ?? 'http://localhost:5173')).replace(/\/+$/, '');
+    const url = `${origin}/track/${encodeURIComponent(order.ticketCode)}?k=${trackKey}`;
+    const dataUrl = await QRCode.toDataURL(url, { margin: 1, width: 360 });
+    return { url, dataUrl };
+  });
+
   // L'équipe a prévenu le client (appel passé / message envoyé)
-  app.post('/orders/:id/notified', { preHandler: requireAuth }, async (req, reply) => {
+  app.post('/orders/:id/notified', { preHandler: [requireAuth, requireRole('ADMIN', 'MANAGER', 'RECEPTION')] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const Body = z.object({ done: z.boolean().default(true) });
     const { done } = Body.parse(req.body ?? {});
     const existing = await prisma.order.findUnique({ where: { id } });
     if (!existing) return reply.code(404).send({ error: 'not_found' });
+    if (done && existing.status !== 'PRETE') return reply.code(409).send({ error: 'not_ready' });
     const order = await prisma.order.update({ where: { id }, data: { notifiedAt: done ? new Date() : null } });
     if (done) await prisma.notification.updateMany({ where: { orderId: id, status: 'PENDING' }, data: { status: 'SENT', sentAt: new Date() } });
     await audit({ userId: req.user.sub, action: 'ORDER_CLIENT_NOTIFIED', entityType: 'Order', entityId: id, payload: { done } });

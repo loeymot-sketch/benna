@@ -75,12 +75,12 @@ export function OrdersPage() {
         </button>
         {STATUS_FILTERS.map((f) => (
           <button
-            key={f.id} onClick={() => setFilter(f)}
+            key={f.id} onClick={() => { setFilter(f); if (toNotify) setSp(mine ? { mine: '1' } : {}); }}
             style={{
               padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
-              background: filter.id === f.id ? COLORS.primary : '#fff',
-              color: filter.id === f.id ? '#fff' : COLORS.text,
-              border: `1px solid ${filter.id === f.id ? COLORS.primary : COLORS.border}`,
+              background: filter.id === f.id && !toNotify ? COLORS.primary : '#fff',
+              color: filter.id === f.id && !toNotify ? '#fff' : COLORS.text,
+              border: `1px solid ${filter.id === f.id && !toNotify ? COLORS.primary : COLORS.border}`,
               cursor: 'pointer',
             }}
           >

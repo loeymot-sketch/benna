@@ -16,6 +16,7 @@ import financeRoutes from './routes/finance.js';
 import absencesRoutes from './routes/absences.js';
 import uploadsRoutes from './routes/uploads.js';
 import eventsRoutes from './routes/events.js';
+import { ZodError } from 'zod';
 import './config.js';
 import { prisma } from './db.js';
 import { PROD, hasDatabaseUrl } from './config.js';
@@ -40,6 +41,17 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(cors, { origin: ORIGINS, credentials: true });
   await app.register(jwt, { secret });
   await app.register(multipart, { limits: { fileSize: 12 * 1024 * 1024 } });
+
+  // Données invalides (zod) = erreur du client (400), pas une panne serveur (500).
+  app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof ZodError) {
+      const first = err.issues[0]?.message ?? '';
+      return reply.code(400).send({ error: /^[a-z_]+$/.test(first) ? first : 'invalid_request', issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
+    }
+    const status = (err as any).statusCode ?? 500;
+    if (status >= 500) app.log.error(err);
+    return reply.code(status).send({ error: status >= 500 ? 'server_error' : (err as any).code ?? err.message });
+  });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 

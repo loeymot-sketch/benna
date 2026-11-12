@@ -51,7 +51,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/catalog', { preHandler: requireAuth }, async (req) => {
     const all = (req.query as any)?.all === '1' && req.user.role === 'ADMIN';
     const items = await prisma.catalogItem.findMany({
-      where: all ? {} : { isActive: true },
+      where: all ? {} : { isActive: true, service: { isActive: true } },
       include: { service: true },
       orderBy: { name: 'asc' },
     });
@@ -65,8 +65,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
     unit: z.string().trim().min(1).default('unité'),
   });
 
-  app.post('/catalog', { preHandler: admin }, async (req) => {
+  app.post('/catalog', { preHandler: admin }, async (req, reply) => {
     const data = ItemBody.parse(req.body);
+    if (!(await prisma.service.findUnique({ where: { id: data.serviceId } }))) return reply.code(400).send({ error: 'service_not_found' });
     const item = await prisma.catalogItem.create({ data, include: { service: true } });
     await audit({ userId: req.user.sub, action: 'CATALOG_ITEM_CREATED', entityType: 'CatalogItem', entityId: item.id, payload: data });
     return { item };

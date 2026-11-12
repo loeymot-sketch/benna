@@ -1,13 +1,17 @@
 import type { FastifyInstance } from 'fastify';
-import QRCode from 'qrcode';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { emit } from '../events.js';
 
+// Le code ticket (LB-AAAAMM-0001) est séquentiel donc devinable : il ne suffit PAS à voir les données du client.
+// Le QR remis au client contient aussi un secret aléatoire (?k=…). Sans lui, la page publique ne montre que
+// l'étape et les dates (aucun nom, montant, ni numéro) et le choix de notification est refusé.
+const keyOk = (order: { trackKey: string | null }, k?: string | null) => !!order.trackKey && !!k && k === order.trackKey;
+
 export default async function trackRoutes(app: FastifyInstance) {
-  // Public order tracking by ticketCode — no auth, minimal data
   app.get('/track/:code', async (req, reply) => {
     const { code } = req.params as { code: string };
+    const { k } = (req.query ?? {}) as { k?: string };
     const order = await prisma.order.findUnique({
       where: { ticketCode: code.toUpperCase() },
       include: {
@@ -17,42 +21,52 @@ export default async function trackRoutes(app: FastifyInstance) {
     });
     if (!order || order.deletedAt) return reply.code(404).send({ error: 'not_found' });
 
-    const dueAmount = order.totalAmount - order.discountAmount - order.paidAmount;
-    return {
+    const base = {
       ticketCode: order.ticketCode,
-      customerFirstName: order.customer.fullName.trim().split(' ')[0] ?? '',
+      status: order.status,
+      urgency: order.urgency,
+      deliveryDate: order.deliveryDate,
+      deliveryTime: order.deliveryTime,
       plannedFor: order.plannedFor,
       plannedNote: order.plannedNote,
+      timeline: order.statusHistory.map((h) => ({ toStatus: h.toStatus, at: h.createdAt })),
+    };
+    if (!keyOk(order, k)) return { ...base, limited: true };
+
+    const dueAmount = order.totalAmount - order.discountAmount - order.paidAmount;
+    return {
+      ...base,
+      limited: false,
+      customerFirstName: order.customer.fullName.trim().split(' ')[0] ?? '',
       totalAmount: order.totalAmount,
       discountAmount: order.discountAmount,
       paidAmount: order.paidAmount,
       notifyMode: order.notifyMode,
       hasPhone: !!(order.customer.phone || order.notifyPhone),
-      status: order.status,
-      urgency: order.urgency,
-      deliveryDate: order.deliveryDate,
-      deliveryTime: order.deliveryTime,
       remainingAmount: Math.max(0, dueAmount),
-      timeline: order.statusHistory.map((h) => ({
-        toStatus: h.toStatus,
-        at: h.createdAt,
-      })),
     };
   });
 
-  // Le client choisit sur la page de suivi comment être prévenu quand c'est prêt (public, par code ticket)
+  // Le client choisit comment être prévenu quand c'est prêt (public, mais exige le secret du QR)
   app.post('/track/:code/notify', async (req, reply) => {
     const { code } = req.params as { code: string };
     const Body = z.object({
       mode: z.enum(['NONE', 'CALL', 'WHATSAPP']),
       phone: z.string().max(30).optional().nullable(),
+      key: z.string().max(64).optional().nullable(),
     });
-    const { mode, phone } = Body.parse(req.body);
+    const { mode, phone, key } = Body.parse(req.body);
     const order = await prisma.order.findUnique({ where: { ticketCode: code.toUpperCase() }, include: { customer: true } });
-    if (!order || order.deletedAt) return reply.code(404).send({ error: 'not_found' });
+    // Même réponse qu'un code inconnu si le secret est faux : on ne confirme pas l'existence de la commande.
+    if (!order || order.deletedAt || !keyOk(order, key)) return reply.code(404).send({ error: 'not_found' });
+    // Commande prête ou terminée : le choix n'a plus d'effet (la file « à prévenir » est déjà créée / inutile).
+    if (['PRETE', 'LIVREE', 'ANNULEE'].includes(order.status)) return reply.code(409).send({ error: 'order_closed' });
+    // Un numéro déjà connu (fiche client ou saisi avant) ne se remplace jamais depuis la page publique ; l'équipe le corrige côté admin.
+    const known = order.customer.phone || order.notifyPhone;
     const digits = (phone ?? '').replace(/\D/g, '');
+    if (!known && digits.length > 0 && digits.length < 8) return reply.code(400).send({ error: 'invalid_phone' });
     let notifyPhone = order.notifyPhone;
-    if (digits.length >= 8) notifyPhone = digits.startsWith('216') ? `+${digits}` : digits.length === 8 ? `+216${digits}` : `+${digits}`;
+    if (!known && digits.length >= 8) notifyPhone = digits.startsWith('216') ? `+${digits}` : digits.length === 8 ? `+216${digits}` : `+${digits}`;
     if (mode !== 'NONE' && !order.customer.phone && !notifyPhone) return reply.code(400).send({ error: 'phone_required' });
     await prisma.order.update({
       where: { id: order.id },
@@ -60,14 +74,5 @@ export default async function trackRoutes(app: FastifyInstance) {
     });
     await emit('order.updated', { id: order.id });
     return { ok: true, notifyMode: mode };
-  });
-
-  // QR PNG for an order
-  app.get('/track/:code/qr.png', async (req, reply) => {
-    const { code } = req.params as { code: string };
-    const url = `${process.env.PUBLIC_BASE_URL ?? 'http://localhost:5173'}/track/${code.toUpperCase()}`;
-    const png = await QRCode.toBuffer(url, { type: 'png', margin: 1, width: 320 });
-    reply.type('image/png');
-    return png;
   });
 }

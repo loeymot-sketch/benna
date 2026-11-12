@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { COLORS, STATUS_LABELS, fmtDate, fmtTND } from '../lib/tokens';
 import { Logo } from '../components/Atoms';
@@ -11,9 +11,13 @@ const STEPS = [
   { id: 'PRETE', label: 'Prête' },
   { id: 'LIVREE', label: 'Livrée' },
 ];
+// Statuts « intermédiaires » : on les rattache à l'étape visible la plus proche pour que la progression ne retombe pas à zéro.
+const STEP_OF: Record<string, string> = { EN_ATTENTE: 'RECUE', VALIDATION_CLIENT: 'EN_COURS_DESIGN', EN_FINITION: 'EN_PRODUCTION' };
 
 export function TrackPage() {
   const { code } = useParams<{ code: string }>();
+  const [sp] = useSearchParams();
+  const key = sp.get('k') ?? '';
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,7 +25,10 @@ export function TrackPage() {
   const [notifyError, setNotifyError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const load = () => api.get(`/track/${code}`).then((r) => setData(r.data)).catch(() => setError('not_found'));
+  // « Introuvable » seulement sur un vrai 404 : une coupure réseau garde les données affichées et réessaie au prochain tour.
+  const load = () => api.get(`/track/${code}`, { params: key ? { k: key } : {} })
+    .then((r) => { setData(r.data); setError(null); })
+    .catch((e) => { if (e?.response?.status === 404) setError('not_found'); });
   // QR dynamique : la page se met à jour toute seule (toutes les 15 s)
   useEffect(() => {
     load();
@@ -33,10 +40,12 @@ export function TrackPage() {
   const setNotify = async (mode: 'NONE' | 'CALL' | 'WHATSAPP') => {
     setNotifyError(null); setSaving(true);
     try {
-      await api.post(`/track/${code}/notify`, { mode, phone: phone || null });
+      await api.post(`/track/${code}/notify`, { mode, phone: phone || null, key });
       await load();
     } catch (e: any) {
-      setNotifyError(e.response?.data?.error === 'phone_required' ? 'Ajoute ton numéro pour que nous puissions te prévenir.' : 'Une erreur est survenue, réessaie.');
+      const c = e.response?.data?.error;
+      if (c === 'order_closed') { await load(); setSaving(false); return; } // la commande vient de passer à « prête » : on rafraîchit
+      setNotifyError(c === 'phone_required' ? 'Ajoute ton numéro pour que nous puissions te prévenir.' : c === 'invalid_phone' ? 'Ce numéro semble incomplet.' : 'Une erreur est survenue, réessaie.');
     } finally { setSaving(false); }
   };
 
@@ -51,7 +60,9 @@ export function TrackPage() {
   );
   if (!data) return <div className="h-full flex items-center justify-center" style={{ color: COLORS.muted }}>Chargement…</div>;
 
-  const currentStepIndex = STEPS.findIndex((s) => s.id === data.status);
+  const currentStepIndex = STEPS.findIndex((s) => s.id === (STEP_OF[data.status] ?? data.status));
+  const isCancelled = data.status === 'ANNULEE';
+  const limited = !!data.limited;
   const isReady = data.status === 'PRETE';
   const isDelivered = data.status === 'LIVREE';
 
@@ -69,7 +80,8 @@ export function TrackPage() {
         }}>
           <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.85 }}>{data.customerFirstName ? `Bonjour ${data.customerFirstName}` : 'Bonjour'}</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>
-            {isReady ? '🎉 Votre commande est PRÊTE' :
+            {isCancelled ? 'Commande annulée' :
+             isReady ? '🎉 Votre commande est PRÊTE' :
              isDelivered ? '✓ Commande livrée' :
              'Votre commande est en cours'}
           </div>
@@ -122,6 +134,7 @@ export function TrackPage() {
             <div style={{ fontSize: 12, color: COLORS.muted }}>Date de livraison prévue</div>
             <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtDate(data.deliveryDate)} {data.deliveryTime && `· ${data.deliveryTime}`}</div>
           </div>
+          {!limited && (<>
           <div className="flex justify-between items-center mb-3" style={{ paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
             <div style={{ fontSize: 12, color: COLORS.muted }}>Prix de la commande</div>
             <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtTND(data.totalAmount - (data.discountAmount ?? 0))}</div>
@@ -141,9 +154,10 @@ export function TrackPage() {
               <div style={{ fontSize: 16, fontWeight: 700, color: COLORS.warning }}>{fmtTND(data.remainingAmount)}</div>
             </div>
           )}
+          </>)}
         </div>
 
-        {!isDelivered && data.status !== 'ANNULEE' && (
+        {!isDelivered && !isCancelled && !limited && (
           <div style={{ background: '#fff', padding: 20, borderRadius: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.5, marginBottom: 12 }}>
               {isReady ? 'VOTRE COMMANDE EST PRÊTE' : 'ÊTRE PRÉVENU QUAND C\'EST PRÊT'}
@@ -152,7 +166,7 @@ export function TrackPage() {
               <>
                 {!data.hasPhone && (
                   <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Ton numéro (ex. 28 555 123)"
-                    style={{ width: '100%', height: 44, padding: '0 14px', borderRadius: 10, border: `1px solid ${COLORS.border}`, fontSize: 15, marginBottom: 10 }} />
+                    style={{ width: '100%', height: 44, padding: '0 14px', borderRadius: 10, border: `1px solid ${COLORS.border}`, fontSize: 16, marginBottom: 10 }} />
                 )}
                 <div className="flex flex-col gap-2">
                   {([['WHATSAPP', '💬 Merci de me notifier sur WhatsApp'], ['CALL', '📞 Merci de m\'appeler quand c\'est prêt'], ['NONE', 'Pas besoin, je passerai voir']] as const).map(([m, l]) => (
@@ -177,6 +191,12 @@ export function TrackPage() {
               </>
             )}
             {isReady && <div style={{ fontSize: 13 }}>Vous pouvez passer la récupérer en boutique.</div>}
+          </div>
+        )}
+
+        {limited && !isCancelled && (
+          <div style={{ background: '#fff', padding: 16, borderRadius: 16, marginBottom: 16, fontSize: 13, color: COLORS.muted, textAlign: 'center' }}>
+            Pour voir le prix et choisir comment être prévenu, scanne le QR de ton reçu.
           </div>
         )}
 

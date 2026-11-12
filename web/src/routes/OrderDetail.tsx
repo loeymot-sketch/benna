@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { apiUrl } from '../lib/config';
 import { shrinkImage } from '../lib/image';
 import { Card, StatusPill, UrgencyDot, Button, PostTypeChip, Avatar } from '../components/Atoms';
-import { COLORS, fmtTND, fmtDate, fmtDateTime, timeAgo, fmtPhone, fullName, clientName, STATUS_LABELS } from '../lib/tokens';
+import { COLORS, fmtTND, fmtDate, fmtDateTime, timeAgo, fmtPhone, fullName, clientName, localISODate, STATUS_LABELS } from '../lib/tokens';
 import { getSocket } from '../lib/socket';
 
 const PAYMENT_METHODS = ['ESPECES','CARTE','VIREMENT','CHEQUE','D17','EDINAR','AUTRE'];
@@ -90,13 +90,6 @@ export function OrderDetailPage() {
           {users.map((u) => <option key={u.id} value={u.id}>{fullName(u)} · {u.role}</option>)}
         </select>
         <Button variant="secondary" onClick={() => setShowQr(true)}>📱 Afficher le QR client</Button>
-        <a
-          href={`/track/${order.ticketCode}`}
-          target="_blank" rel="noreferrer"
-          style={{ fontSize: 12, color: COLORS.primary, textDecoration: 'none' }}
-        >
-          🔗 Page publique
-        </a>
         <div className="flex-1" />
         <Button variant="secondary" onClick={() => setTab('carnet')}>📓 Ajouter au Carnet</Button>
       </div>
@@ -415,7 +408,9 @@ function StatusPanel({ order, onChange }: { order: any; onChange: () => void }) 
   const [note, setNote] = useState(order.plannedNote ?? '');
   const [pending, setPending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setPlanned(toInputDate(order.plannedFor)); setNote(order.plannedNote ?? ''); setPending(null); }, [order.status, order.plannedFor, order.plannedNote]);
+  const [editPhone, setEditPhone] = useState<string | null>(null);
+  // une mise à jour venue d'un collègue ne doit pas effacer une date en cours de saisie
+  useEffect(() => { if (pending) return; setPlanned(toInputDate(order.plannedFor)); setNote(order.plannedNote ?? ''); }, [order.status, order.plannedFor, order.plannedNote]);
 
   const needsDate = (s: string) => !['RECUE', 'LIVREE', 'ANNULEE', 'PRETE'].includes(s);
   const send = async (status: string, plannedFor: string | null, plannedNote: string | null) => {
@@ -464,7 +459,7 @@ function StatusPanel({ order, onChange }: { order: any; onChange: () => void }) 
                 style={{ height: 36, padding: '0 10px', borderRadius: 8, border: `1px solid ${COLORS.border}`, fontSize: 14 }} />
               {[['Aujourd\'hui', 0], ['Demain', 1], ['+2 j', 2], ['+1 sem.', 7]].map(([l, n]) => (
                 <Button key={l as string} type="button" size="sm" variant="secondary" onClick={() => {
-                  const d = new Date(); d.setDate(d.getDate() + (n as number)); setPlanned(d.toISOString().slice(0, 10));
+                  const d = new Date(); d.setDate(d.getDate() + (n as number)); setPlanned(localISODate(d));
                 }}>{l}</Button>
               ))}
             </div>
@@ -493,6 +488,19 @@ function StatusPanel({ order, onChange }: { order: any; onChange: () => void }) 
           <div className="flex-1" style={{ minWidth: 200 }}>
             <strong>{NOTIFY_LABEL[order.notifyMode]}</strong> quand c'est prêt
             {' · '}{fmtPhone(order.notifyPhone || order.customer?.phone) || <span style={{ color: COLORS.danger }}>aucun numéro</span>}
+            {editPhone === null ? (
+              <button type="button" onClick={() => setEditPhone(order.notifyPhone || order.customer?.phone || '')}
+                style={{ marginLeft: 8, background: 'none', border: 'none', color: COLORS.primary, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+                modifier le numéro
+              </button>
+            ) : (
+              <span className="inline-flex gap-1" style={{ marginLeft: 8 }}>
+                <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} inputMode="tel" autoFocus aria-label="Numéro à prévenir"
+                  style={{ height: 28, padding: '0 8px', borderRadius: 6, border: `1px solid ${COLORS.border}`, fontSize: 13, width: 150 }} />
+                <Button size="sm" onClick={async () => { await api.patch(`/orders/${order.id}`, { notifyPhone: editPhone.trim() || null }); setEditPhone(null); onChange(); }}>OK</Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditPhone(null)}>✕</Button>
+              </span>
+            )}
             {order.notifiedAt && <span style={{ color: COLORS.success }}> · ✓ prévenu le {fmtDateTime(order.notifiedAt)}</span>}
             <div style={{ fontSize: 11, color: COLORS.muted, marginTop: 2 }}>L'envoi WhatsApp automatique sera branché prochainement.</div>
           </div>
@@ -519,20 +527,27 @@ function StatusPanel({ order, onChange }: { order: any; onChange: () => void }) 
 }
 
 function QrModal({ order, onClose }: { order: any; onClose: () => void }) {
-  const link = `${window.location.origin}/track/${order.ticketCode}`;
+  const [qr, setQr] = useState<{ url: string; dataUrl: string } | null>(null);
+  const [failed, setFailed] = useState(false);
+  // Le lien contient un secret propre à la commande : il est fourni par le serveur à l'équipe seulement.
+  useEffect(() => {
+    api.get(`/orders/${order.id}/qr`, { params: { base: window.location.origin } }).then((r) => setQr(r.data)).catch(() => setFailed(true));
+  }, [order.id]);
+  const link = qr?.url ?? '';
   return (
     <div className="fixed inset-0 flex items-center justify-center" onClick={onClose} style={{ background: 'rgba(0,0,0,0.55)', zIndex: 100 }}>
       <Card style={{ padding: 28, width: 420, maxWidth: '92vw', textAlign: 'center' }}>
         <div onClick={(e) => e.stopPropagation()}>
           <div style={{ fontSize: 13, color: COLORS.muted, fontWeight: 600 }}>Scanne pour suivre ta commande</div>
           <div style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 20, fontWeight: 800, color: COLORS.primary, margin: '6px 0 14px' }}>{order.ticketCode}</div>
-          <img src={apiUrl(`/api/track/${order.ticketCode}/qr.png`)} alt="QR de suivi" style={{ width: 300, height: 300, maxWidth: '100%', margin: '0 auto', imageRendering: 'pixelated' }} />
+          {qr ? <img src={qr.dataUrl} alt={`QR de suivi de la commande ${order.ticketCode}`} style={{ width: 300, height: 300, maxWidth: '100%', margin: '0 auto', imageRendering: 'pixelated' }} />
+            : <div style={{ width: 300, height: 300, maxWidth: '100%', margin: '0 auto', color: COLORS.muted, fontSize: 13 }} className="flex items-center justify-center">{failed ? 'QR indisponible, réessaie.' : 'Génération du QR…'}</div>}
           <div style={{ fontSize: 12, color: COLORS.muted, marginTop: 12, lineHeight: 1.5 }}>
             Le client voit en direct l'état de sa commande, la date prévue, le prix et le reste à payer.
           </div>
           <div className="flex gap-2 justify-center mt-4 flex-wrap">
-            <Button variant="secondary" onClick={() => navigator.clipboard?.writeText(link)}>Copier le lien</Button>
-            <Button variant="secondary" onClick={() => window.open(`/track/${order.ticketCode}`, '_blank')}>Voir la page client</Button>
+            <Button variant="secondary" disabled={!qr} onClick={() => navigator.clipboard?.writeText(link)}>Copier le lien</Button>
+            <Button variant="secondary" disabled={!qr} onClick={() => window.open(link, '_blank')}>Voir la page client</Button>
             <Button onClick={onClose}>Fermer</Button>
           </div>
         </div>

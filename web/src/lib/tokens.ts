@@ -60,6 +60,10 @@ export const POST_TYPE_META: Record<string, { label: string; color: string; icon
 // Prénom et nom sont facultatifs : sans eux on affiche le rôle (ou « Membre »).
 export const fullName = (u: { firstName?: string | null; lastName?: string | null; role?: string }) =>
   `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || (u.role ? (ROLE_LABELS[u.role] ?? u.role) : 'Membre');
+// Date locale AAAA-MM-JJ (toISOString donne la date UTC : décalée d'un jour entre minuit et 1 h en Tunisie).
+export function localISODate(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 // Le nom du client est facultatif aussi.
 export const clientName = (c?: { fullName?: string | null } | null) => c?.fullName?.trim() || 'Client sans nom';
 

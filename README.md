@@ -95,7 +95,7 @@ Mets `DATABASE_URL` et `DIRECT_URL` dans `.env` (modèle : `.env.example`), puis
 | Le Carnet (Addendum #1) | ✅ | 8 types imposés, scopes (DIRECT/ROLE/SHOP/ALL), threads, accusés, réactions, mentions, absences |
 | Pour Moi (inbox) | ✅ | Onglets À traiter / À suivre / Archive |
 | Composer post | ✅ | UX 2 étapes : choix du type → formulaire spécifique |
-| Page tracking publique | ✅ | `/track/:ticketCode` sans login + QR PNG `/api/track/:code/qr.png` |
+| Page tracking publique | ✅ | `/track/:ticketCode` sans login + QR PNG `/api/orders/:id/qr (équipe, lien + QR avec secret)` |
 | Caisse | ✅ | Total jour + breakdown par mode + liste encaissements |
 | Clients (CRM) | ✅ | Liste + recherche + fiche avec historique |
 | Audit log | ✅ | Toutes actions critiques tracées |

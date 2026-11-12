@@ -5,10 +5,10 @@ import { requireAuth } from '../auth.js';
 import { audit } from '../audit.js';
 
 // Le GSM est facultatif : chaîne vide ou absente = pas de numéro.
-const PhoneSchema = z.string().max(30).optional().nullable().transform((v) => {
-  const digits = (v ?? '').replace(/\D/g, '');
-  return digits.length >= 8 ? v! : null;
-});
+// Un numéro saisi mais incomplet est refusé (invalid_phone) plutôt que jeté en silence.
+const PhoneSchema = z.string().max(30).optional().nullable()
+  .refine((v) => { const n = (v ?? '').replace(/\D/g, '').length; return n === 0 || n >= 8; }, 'invalid_phone')
+  .transform((v) => ((v ?? '').replace(/\D/g, '').length >= 8 ? v! : null));
 
 function normalizePhone(raw: string) {
   const digits = raw.replace(/\D/g, '');
@@ -97,9 +97,16 @@ export default async function customersRoutes(app: FastifyInstance) {
     let c = phone ? await prisma.customer.findUnique({ where: { phone } }) : null;
     if (c && !c.fullName && name) c = await prisma.customer.update({ where: { id: c.id }, data: { fullName: name } });
     if (!c) {
-      c = await prisma.customer.create({
-        data: { fullName: name, phone, email: data.email ?? null, tags: '[]' },
-      });
+      try {
+        c = await prisma.customer.create({
+          data: { fullName: name, phone, email: data.email ?? null, tags: '[]' },
+        });
+      } catch (e: any) {
+        // double clic / deux postes en même temps avec le même GSM : on relit la fiche créée par l'autre requête
+        if (e?.code === 'P2002' && phone) c = await prisma.customer.findUnique({ where: { phone } });
+        else throw e;
+      }
+      if (!c) throw new Error('customer_create_failed');
       await audit({ userId: req.user.sub, action: 'CUSTOMER_CREATED', entityType: 'Customer', entityId: c.id });
     }
     return { customer: c };

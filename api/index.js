@@ -109,7 +109,7 @@ var require_main = __commonJS({
     var fs2 = __require("fs");
     var path2 = __require("path");
     var os = __require("os");
-    var crypto = __require("crypto");
+    var crypto2 = __require("crypto");
     var packageJson = require_package();
     var version = packageJson.version;
     var LINE = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/mg;
@@ -328,7 +328,7 @@ var require_main = __commonJS({
       const authTag = ciphertext.subarray(-16);
       ciphertext = ciphertext.subarray(12, -16);
       try {
-        const aesgcm = crypto.createDecipheriv("aes-256-gcm", key, nonce);
+        const aesgcm = crypto2.createDecipheriv("aes-256-gcm", key, nonce);
         aesgcm.setAuthTag(authTag);
         return `${aesgcm.update(ciphertext)}${aesgcm.final()}`;
       } catch (error) {
@@ -56690,10 +56690,10 @@ async function usersRoutes(app) {
 }
 
 // server/src/routes/customers.ts
-var PhoneSchema = external_exports.string().max(30).optional().nullable().transform((v) => {
-  const digits = (v ?? "").replace(/\D/g, "");
-  return digits.length >= 8 ? v : null;
-});
+var PhoneSchema = external_exports.string().max(30).optional().nullable().refine((v) => {
+  const n = (v ?? "").replace(/\D/g, "").length;
+  return n === 0 || n >= 8;
+}, "invalid_phone").transform((v) => (v ?? "").replace(/\D/g, "").length >= 8 ? v : null);
 function normalizePhone(raw) {
   const digits = raw.replace(/\D/g, "");
   if (digits.startsWith("216")) return `+${digits}`;
@@ -56779,9 +56779,15 @@ async function customersRoutes(app) {
     let c = phone ? await prisma.customer.findUnique({ where: { phone } }) : null;
     if (c && !c.fullName && name) c = await prisma.customer.update({ where: { id: c.id }, data: { fullName: name } });
     if (!c) {
-      c = await prisma.customer.create({
-        data: { fullName: name, phone, email: data.email ?? null, tags: "[]" }
-      });
+      try {
+        c = await prisma.customer.create({
+          data: { fullName: name, phone, email: data.email ?? null, tags: "[]" }
+        });
+      } catch (e) {
+        if (e?.code === "P2002" && phone) c = await prisma.customer.findUnique({ where: { phone } });
+        else throw e;
+      }
+      if (!c) throw new Error("customer_create_failed");
       await audit({ userId: req.user.sub, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: c.id });
     }
     return { customer: c };
@@ -56875,8 +56881,11 @@ async function uploadsRoutes(app) {
 }
 
 // server/src/routes/orders.ts
+var import_qrcode = __toESM(require_lib2(), 1);
+import crypto from "node:crypto";
 var Statuses = ["RECUE", "EN_ATTENTE", "EN_COURS_DESIGN", "VALIDATION_CLIENT", "EN_PRODUCTION", "EN_FINITION", "PRETE", "LIVREE", "ANNULEE"];
 var Urgencies = ["NORMAL", "PRIORITAIRE", "URGENT", "EXPRESS"];
+var DateStr = external_exports.string().refine((v) => !isNaN(new Date(v).getTime()), "invalid_date");
 var NotifyModes = ["NONE", "CALL", "WHATSAPP"];
 var PaymentMethods = ["ESPECES", "CARTE", "VIREMENT", "CHEQUE", "D17", "EDINAR", "AUTRE"];
 function computePaymentStatus(total, paid, discount) {
@@ -56916,7 +56925,8 @@ async function ordersRoutes(app) {
         { description: { contains: f.q, mode: "insensitive" } },
         { pouchNumber: { contains: f.q, mode: "insensitive" } },
         { customer: { fullName: { contains: f.q, mode: "insensitive" } } },
-        { customer: { phone: { contains: f.q, mode: "insensitive" } } }
+        { customer: { phone: { contains: f.q, mode: "insensitive" } } },
+        { notifyPhone: { contains: f.q, mode: "insensitive" } }
       ];
     }
     const orders = await prisma.order.findMany({
@@ -56930,7 +56940,7 @@ async function ordersRoutes(app) {
         services: { include: { service: true } }
       }
     });
-    return { orders };
+    return { orders: orders.map(({ trackKey: _k, ...o }) => o) };
   });
   app.get("/orders/:id", { preHandler: requireAuth }, async (req, reply) => {
     const { id } = req.params;
@@ -56958,7 +56968,8 @@ async function ordersRoutes(app) {
     });
     if (!order || order.deletedAt) return reply.code(404).send({ error: "not_found" });
     const attachments = await Promise.all(order.attachments.map(async (a) => ({ ...a, url: await fileUrl(a.path, (k) => signFile(app, k)) })));
-    return { order: { ...order, attachments } };
+    const { trackKey: _k, ...safe } = order;
+    return { order: { ...safe, attachments } };
   });
   app.post("/orders", { preHandler: requireAuth }, async (req) => {
     const Body = external_exports.object({
@@ -56970,7 +56981,7 @@ async function ordersRoutes(app) {
       paidAmount: external_exports.number().nonnegative().default(0),
       discountAmount: external_exports.number().nonnegative().default(0),
       urgency: external_exports.enum(Urgencies).default("NORMAL"),
-      deliveryDate: external_exports.string(),
+      deliveryDate: DateStr,
       deliveryTime: external_exports.string().optional().nullable(),
       internalNotes: external_exports.string().optional().nullable(),
       assignedToId: external_exports.string().optional().nullable(),
@@ -57010,6 +57021,7 @@ async function ordersRoutes(app) {
         deliveryDate: new Date(data.deliveryDate),
         deliveryTime: data.deliveryTime ?? null,
         internalNotes: data.internalNotes ?? null,
+        trackKey: crypto.randomBytes(8).toString("hex"),
         notifyMode: data.notifyMode ?? "NONE",
         notifyRequestedAt: data.notifyMode && data.notifyMode !== "NONE" ? /* @__PURE__ */ new Date() : null,
         createdById: req.user.sub,
@@ -57048,13 +57060,13 @@ async function ordersRoutes(app) {
       totalAmount: external_exports.number().nonnegative().optional(),
       discountAmount: external_exports.number().nonnegative().optional(),
       urgency: external_exports.enum(Urgencies).optional(),
-      deliveryDate: external_exports.string().optional(),
+      deliveryDate: DateStr.optional(),
       deliveryTime: external_exports.string().nullable().optional(),
       internalNotes: external_exports.string().nullable().optional(),
       assignedToId: external_exports.string().nullable().optional(),
       pouchNumber: external_exports.string().nullable().optional(),
       productionSubStatus: external_exports.string().nullable().optional(),
-      plannedFor: external_exports.string().nullable().optional(),
+      plannedFor: DateStr.nullable().optional(),
       plannedNote: external_exports.string().nullable().optional(),
       notifyMode: external_exports.enum(NotifyModes).optional(),
       notifyPhone: external_exports.string().nullable().optional(),
@@ -57065,6 +57077,11 @@ async function ordersRoutes(app) {
     if (!existing) return reply.code(404).send({ error: "not_found" });
     const updateData = { ...data };
     if (data.deliveryDate) updateData.deliveryDate = new Date(data.deliveryDate);
+    if (data.notifyPhone !== void 0) {
+      const d = (data.notifyPhone ?? "").replace(/\D/g, "");
+      if (d.length > 0 && d.length < 8) return reply.code(400).send({ error: "invalid_phone" });
+      updateData.notifyPhone = d.length < 8 ? null : d.startsWith("216") ? `+${d}` : d.length === 8 ? `+216${d}` : `+${d}`;
+    }
     if (data.plannedFor !== void 0) updateData.plannedFor = data.plannedFor ? new Date(data.plannedFor) : null;
     if (data.notifyMode !== void 0) updateData.notifyRequestedAt = data.notifyMode === "NONE" ? null : /* @__PURE__ */ new Date();
     if (data.totalAmount !== void 0 || data.discountAmount !== void 0) {
@@ -57101,7 +57118,7 @@ async function ordersRoutes(app) {
     const Body = external_exports.object({
       status: external_exports.enum(Statuses),
       comment: external_exports.string().optional(),
-      plannedFor: external_exports.string().nullable().optional(),
+      plannedFor: DateStr.nullable().optional(),
       // « prévu pour » la nouvelle étape
       plannedNote: external_exports.string().nullable().optional()
     });
@@ -57131,14 +57148,15 @@ async function ordersRoutes(app) {
           status,
           plannedFor: plannedFor ? new Date(plannedFor) : null,
           // une nouvelle étape repart sans date annoncée
-          plannedNote: plannedNote ?? null,
-          ...status === "PRETE" ? { notifiedAt: null } : {}
+          plannedNote: plannedNote ?? null
         },
         include: { customer: true }
       });
       if (status === "PRETE" && existing.notifyMode !== "NONE") {
         const recipient = existing.notifyPhone ?? updated.customer.phone ?? "";
-        await tx.notification.create({ data: {
+        const already = await tx.notification.count({ where: { orderId: id, status: "PENDING" } });
+        if (recipient && !already && existing.notifiedAt) await tx.order.update({ where: { id }, data: { notifiedAt: null } });
+        if (recipient && !already) await tx.notification.create({ data: {
           orderId: id,
           channel: existing.notifyMode,
           recipient,
@@ -57158,12 +57176,28 @@ async function ordersRoutes(app) {
     await emit("order.status_changed", { id, from: existing.status, to: status });
     return { order };
   });
-  app.post("/orders/:id/notified", { preHandler: requireAuth }, async (req, reply) => {
+  app.get("/orders/:id/qr", { preHandler: requireAuth }, async (req, reply) => {
+    const { id } = req.params;
+    const { base } = req.query ?? {};
+    const order = await prisma.order.findUnique({ where: { id } });
+    if (!order || order.deletedAt) return reply.code(404).send({ error: "not_found" });
+    let trackKey = order.trackKey;
+    if (!trackKey) {
+      await prisma.order.updateMany({ where: { id, trackKey: null }, data: { trackKey: crypto.randomBytes(8).toString("hex") } });
+      trackKey = (await prisma.order.findUnique({ where: { id }, select: { trackKey: true } })).trackKey;
+    }
+    const origin = (/^https?:\/\/[^/\s]+$/.test(base ?? "") ? base : process.env.PUBLIC_BASE_URL ?? "http://localhost:5173").replace(/\/+$/, "");
+    const url = `${origin}/track/${encodeURIComponent(order.ticketCode)}?k=${trackKey}`;
+    const dataUrl = await import_qrcode.default.toDataURL(url, { margin: 1, width: 360 });
+    return { url, dataUrl };
+  });
+  app.post("/orders/:id/notified", { preHandler: [requireAuth, requireRole("ADMIN", "MANAGER", "RECEPTION")] }, async (req, reply) => {
     const { id } = req.params;
     const Body = external_exports.object({ done: external_exports.boolean().default(true) });
     const { done } = Body.parse(req.body ?? {});
     const existing = await prisma.order.findUnique({ where: { id } });
     if (!existing) return reply.code(404).send({ error: "not_found" });
+    if (done && existing.status !== "PRETE") return reply.code(409).send({ error: "not_ready" });
     const order = await prisma.order.update({ where: { id }, data: { notifiedAt: done ? /* @__PURE__ */ new Date() : null } });
     if (done) await prisma.notification.updateMany({ where: { orderId: id, status: "PENDING" }, data: { status: "SENT", sentAt: /* @__PURE__ */ new Date() } });
     await audit({ userId: req.user.sub, action: "ORDER_CLIENT_NOTIFIED", entityType: "Order", entityId: id, payload: { done } });
@@ -57512,10 +57546,11 @@ async function postsRoutes(app) {
 }
 
 // server/src/routes/track.ts
-var import_qrcode = __toESM(require_lib2(), 1);
+var keyOk = (order, k) => !!order.trackKey && !!k && k === order.trackKey;
 async function trackRoutes(app) {
   app.get("/track/:code", async (req, reply) => {
     const { code } = req.params;
+    const { k } = req.query ?? {};
     const order = await prisma.order.findUnique({
       where: { ticketCode: code.toUpperCase() },
       include: {
@@ -57524,40 +57559,46 @@ async function trackRoutes(app) {
       }
     });
     if (!order || order.deletedAt) return reply.code(404).send({ error: "not_found" });
-    const dueAmount = order.totalAmount - order.discountAmount - order.paidAmount;
-    return {
+    const base = {
       ticketCode: order.ticketCode,
-      customerFirstName: order.customer.fullName.trim().split(" ")[0] ?? "",
+      status: order.status,
+      urgency: order.urgency,
+      deliveryDate: order.deliveryDate,
+      deliveryTime: order.deliveryTime,
       plannedFor: order.plannedFor,
       plannedNote: order.plannedNote,
+      timeline: order.statusHistory.map((h) => ({ toStatus: h.toStatus, at: h.createdAt }))
+    };
+    if (!keyOk(order, k)) return { ...base, limited: true };
+    const dueAmount = order.totalAmount - order.discountAmount - order.paidAmount;
+    return {
+      ...base,
+      limited: false,
+      customerFirstName: order.customer.fullName.trim().split(" ")[0] ?? "",
       totalAmount: order.totalAmount,
       discountAmount: order.discountAmount,
       paidAmount: order.paidAmount,
       notifyMode: order.notifyMode,
       hasPhone: !!(order.customer.phone || order.notifyPhone),
-      status: order.status,
-      urgency: order.urgency,
-      deliveryDate: order.deliveryDate,
-      deliveryTime: order.deliveryTime,
-      remainingAmount: Math.max(0, dueAmount),
-      timeline: order.statusHistory.map((h) => ({
-        toStatus: h.toStatus,
-        at: h.createdAt
-      }))
+      remainingAmount: Math.max(0, dueAmount)
     };
   });
   app.post("/track/:code/notify", async (req, reply) => {
     const { code } = req.params;
     const Body = external_exports.object({
       mode: external_exports.enum(["NONE", "CALL", "WHATSAPP"]),
-      phone: external_exports.string().max(30).optional().nullable()
+      phone: external_exports.string().max(30).optional().nullable(),
+      key: external_exports.string().max(64).optional().nullable()
     });
-    const { mode, phone } = Body.parse(req.body);
+    const { mode, phone, key } = Body.parse(req.body);
     const order = await prisma.order.findUnique({ where: { ticketCode: code.toUpperCase() }, include: { customer: true } });
-    if (!order || order.deletedAt) return reply.code(404).send({ error: "not_found" });
+    if (!order || order.deletedAt || !keyOk(order, key)) return reply.code(404).send({ error: "not_found" });
+    if (["PRETE", "LIVREE", "ANNULEE"].includes(order.status)) return reply.code(409).send({ error: "order_closed" });
+    const known = order.customer.phone || order.notifyPhone;
     const digits = (phone ?? "").replace(/\D/g, "");
+    if (!known && digits.length > 0 && digits.length < 8) return reply.code(400).send({ error: "invalid_phone" });
     let notifyPhone = order.notifyPhone;
-    if (digits.length >= 8) notifyPhone = digits.startsWith("216") ? `+${digits}` : digits.length === 8 ? `+216${digits}` : `+${digits}`;
+    if (!known && digits.length >= 8) notifyPhone = digits.startsWith("216") ? `+${digits}` : digits.length === 8 ? `+216${digits}` : `+${digits}`;
     if (mode !== "NONE" && !order.customer.phone && !notifyPhone) return reply.code(400).send({ error: "phone_required" });
     await prisma.order.update({
       where: { id: order.id },
@@ -57565,13 +57606,6 @@ async function trackRoutes(app) {
     });
     await emit("order.updated", { id: order.id });
     return { ok: true, notifyMode: mode };
-  });
-  app.get("/track/:code/qr.png", async (req, reply) => {
-    const { code } = req.params;
-    const url = `${process.env.PUBLIC_BASE_URL ?? "http://localhost:5173"}/track/${code.toUpperCase()}`;
-    const png = await import_qrcode.default.toBuffer(url, { type: "png", margin: 1, width: 320 });
-    reply.type("image/png");
-    return png;
   });
 }
 
@@ -57616,7 +57650,7 @@ async function catalogRoutes(app) {
   app.get("/catalog", { preHandler: requireAuth }, async (req) => {
     const all = req.query?.all === "1" && req.user.role === "ADMIN";
     const items = await prisma.catalogItem.findMany({
-      where: all ? {} : { isActive: true },
+      where: all ? {} : { isActive: true, service: { isActive: true } },
       include: { service: true },
       orderBy: { name: "asc" }
     });
@@ -57628,8 +57662,9 @@ async function catalogRoutes(app) {
     unitPrice: external_exports.number().nonnegative(),
     unit: external_exports.string().trim().min(1).default("unit\xE9")
   });
-  app.post("/catalog", { preHandler: admin }, async (req) => {
+  app.post("/catalog", { preHandler: admin }, async (req, reply) => {
     const data = ItemBody.parse(req.body);
+    if (!await prisma.service.findUnique({ where: { id: data.serviceId } })) return reply.code(400).send({ error: "service_not_found" });
     const item = await prisma.catalogItem.create({ data, include: { service: true } });
     await audit({ userId: req.user.sub, action: "CATALOG_ITEM_CREATED", entityType: "CatalogItem", entityId: item.id, payload: data });
     return { item };
@@ -58162,6 +58197,15 @@ async function buildApp() {
   await app.register(import_cors.default, { origin: ORIGINS, credentials: true });
   await app.register(import_jwt.default, { secret });
   await app.register(import_multipart.default, { limits: { fileSize: 12 * 1024 * 1024 } });
+  app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof ZodError) {
+      const first = err.issues[0]?.message ?? "";
+      return reply.code(400).send({ error: /^[a-z_]+$/.test(first) ? first : "invalid_request", issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })) });
+    }
+    const status = err.statusCode ?? 500;
+    if (status >= 500) app.log.error(err);
+    return reply.code(status).send({ error: status >= 500 ? "server_error" : err.code ?? err.message });
+  });
   app.get("/health", async () => ({ ok: true, ts: (/* @__PURE__ */ new Date()).toISOString() }));
   app.get("/api/health", async (_req, reply) => {
     const present = (k) => !!(process.env[k] ?? "").trim();
