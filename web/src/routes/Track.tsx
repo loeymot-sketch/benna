@@ -17,9 +17,28 @@ export function TrackPage() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [phone, setPhone] = useState('');
+  const [notifyError, setNotifyError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => api.get(`/track/${code}`).then((r) => setData(r.data)).catch(() => setError('not_found'));
+  // QR dynamique : la page se met à jour toute seule (toutes les 15 s)
   useEffect(() => {
-    api.get(`/track/${code}`).then((r) => setData(r.data)).catch(() => setError('not_found'));
+    load();
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
+
+  const setNotify = async (mode: 'NONE' | 'CALL' | 'WHATSAPP') => {
+    setNotifyError(null); setSaving(true);
+    try {
+      await api.post(`/track/${code}/notify`, { mode, phone: phone || null });
+      await load();
+    } catch (e: any) {
+      setNotifyError(e.response?.data?.error === 'phone_required' ? 'Ajoute ton numéro pour que nous puissions te prévenir.' : 'Une erreur est survenue, réessaie.');
+    } finally { setSaving(false); }
+  };
 
   if (error) return (
     <div className="h-full flex items-center justify-center p-6" style={{ background: COLORS.bg, fontFamily: 'Inter' }}>
@@ -48,7 +67,7 @@ export function TrackPage() {
           color: '#fff', padding: 24, borderRadius: 16,
           marginBottom: 20, boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
         }}>
-          <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.85 }}>Bonjour {data.customerFirstName}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.85 }}>{data.customerFirstName ? `Bonjour ${data.customerFirstName}` : 'Bonjour'}</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6 }}>
             {isReady ? '🎉 Votre commande est PRÊTE' :
              isDelivered ? '✓ Commande livrée' :
@@ -90,12 +109,32 @@ export function TrackPage() {
           </div>
         </div>
 
+        {data.plannedFor && !isReady && !isDelivered && (
+          <div style={{ background: '#fff', padding: 16, borderRadius: 16, marginBottom: 16, border: `1px solid ${COLORS.primary}33` }}>
+            <div style={{ fontSize: 12, color: COLORS.muted }}>Étape « {STATUS_LABELS[data.status]?.label ?? data.status} »</div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>📅 Prévue pour le {fmtDate(data.plannedFor)}{data.plannedNote && ` · ${data.plannedNote}`}</div>
+          </div>
+        )}
+
         {/* Info card */}
         <div style={{ background: '#fff', padding: 20, borderRadius: 16, marginBottom: 16 }}>
           <div className="flex justify-between items-center mb-3">
             <div style={{ fontSize: 12, color: COLORS.muted }}>Date de livraison prévue</div>
             <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtDate(data.deliveryDate)} {data.deliveryTime && `· ${data.deliveryTime}`}</div>
           </div>
+          <div className="flex justify-between items-center mb-3" style={{ paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
+            <div style={{ fontSize: 12, color: COLORS.muted }}>Prix de la commande</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>{fmtTND(data.totalAmount - (data.discountAmount ?? 0))}</div>
+          </div>
+          {data.paidAmount > 0 && (
+            <div className="flex justify-between items-center mb-3">
+              <div style={{ fontSize: 12, color: COLORS.muted }}>Déjà réglé</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.success }}>{fmtTND(data.paidAmount)}</div>
+            </div>
+          )}
+          {data.remainingAmount <= 0 && (
+            <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.success, paddingTop: 4 }}>✓ Commande entièrement réglée</div>
+          )}
           {data.remainingAmount > 0 && (
             <div className="flex justify-between items-center" style={{ paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
               <div style={{ fontSize: 12, color: COLORS.muted }}>Reste à régler à la livraison</div>
@@ -103,6 +142,43 @@ export function TrackPage() {
             </div>
           )}
         </div>
+
+        {!isDelivered && data.status !== 'ANNULEE' && (
+          <div style={{ background: '#fff', padding: 20, borderRadius: 16, marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.5, marginBottom: 12 }}>
+              {isReady ? 'VOTRE COMMANDE EST PRÊTE' : 'ÊTRE PRÉVENU QUAND C\'EST PRÊT'}
+            </div>
+            {!isReady && (
+              <>
+                {!data.hasPhone && (
+                  <input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder="Ton numéro (ex. 28 555 123)"
+                    style={{ width: '100%', height: 44, padding: '0 14px', borderRadius: 10, border: `1px solid ${COLORS.border}`, fontSize: 15, marginBottom: 10 }} />
+                )}
+                <div className="flex flex-col gap-2">
+                  {([['WHATSAPP', '💬 Merci de me notifier sur WhatsApp'], ['CALL', '📞 Merci de m\'appeler quand c\'est prêt'], ['NONE', 'Pas besoin, je passerai voir']] as const).map(([m, l]) => (
+                    <button key={m} disabled={saving} onClick={() => setNotify(m)} style={{
+                      height: 46, borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', textAlign: 'left', padding: '0 14px',
+                      background: data.notifyMode === m ? COLORS.primary : '#fff', color: data.notifyMode === m ? '#fff' : COLORS.text,
+                      border: `2px solid ${data.notifyMode === m ? COLORS.primary : COLORS.border}`,
+                    }}>{data.notifyMode === m ? '✓ ' : ''}{l}</button>
+                  ))}
+                </div>
+                {notifyError && <div style={{ color: COLORS.danger, fontSize: 12, marginTop: 8 }}>{notifyError}</div>}
+                {data.notifyMode !== 'NONE' && !data.hasPhone && !notifyError && (
+                  <div style={{ fontSize: 12, color: COLORS.warning, marginTop: 10, fontWeight: 600 }}>
+                    Il manque ton numéro : saisis-le ci-dessus, puis touche de nouveau ton choix.
+                  </div>
+                )}
+                {data.notifyMode !== 'NONE' && data.hasPhone && (
+                  <div style={{ fontSize: 12, color: COLORS.success, marginTop: 10, fontWeight: 600 }}>
+                    C'est noté : nous vous préviendrons {data.notifyMode === 'WHATSAPP' ? 'sur WhatsApp' : 'par téléphone'} dès que la commande est prête.
+                  </div>
+                )}
+              </>
+            )}
+            {isReady && <div style={{ fontSize: 13 }}>Vous pouvez passer la récupérer en boutique.</div>}
+          </div>
+        )}
 
         <div style={{ textAlign: 'center', fontSize: 11, color: COLORS.muted, padding: 16 }}>
           Labo Photo Numérique EL BENNA · Djerba<br />

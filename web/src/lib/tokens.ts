@@ -57,7 +57,11 @@ export const POST_TYPE_META: Record<string, { label: string; color: string; icon
   SHIFT_HANDOVER: { label: 'Passation shift', color: '#7c3aed', icon: '🗓️', example: 'État de fin de journée' },
 };
 
-export const fullName = (u: { firstName: string; lastName?: string | null }) => `${u.firstName} ${u.lastName ?? ''}`.trim();
+// Prénom et nom sont facultatifs : sans eux on affiche le rôle (ou « Membre »).
+export const fullName = (u: { firstName?: string | null; lastName?: string | null; role?: string }) =>
+  `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || (u.role ? (ROLE_LABELS[u.role] ?? u.role) : 'Membre');
+// Le nom du client est facultatif aussi.
+export const clientName = (c?: { fullName?: string | null } | null) => c?.fullName?.trim() || 'Client sans nom';
 
 export const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin',
@@ -96,7 +100,7 @@ export function timeAgo(d: string | Date) {
 }
 
 export function initials(firstName: string, lastName: string) {
-  return (firstName?.[0] ?? '').toUpperCase() + (lastName?.[0] ?? '').toUpperCase();
+  return ((firstName?.[0] ?? '').toUpperCase() + (lastName?.[0] ?? '').toUpperCase()) || '👤';
 }
 
 // Format Tunisian phone numbers nicely: "+21628555123" → "+216 28 555 123"

@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { shrinkImage } from '../lib/image';
 import { extractPouch, fieldsToVerify, FIELD_LABELS, type PouchExtraction } from '../lib/vision';
 import { Button, Card } from '../components/Atoms';
-import { COLORS, fmtTND } from '../lib/tokens';
+import { COLORS, fmtTND, fullName } from '../lib/tokens';
 import { useAuth } from '../store/auth';
 
 export function OrderNewPage() {
@@ -19,7 +19,9 @@ export function OrderNewPage() {
   const [shopId, setShopId] = useState('');
   const [pouchNumber, setPouchNumber] = useState('');
   const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('+216 ');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [notifyMode, setNotifyMode] = useState('NONE');
+  const [newService, setNewService] = useState<string | null>(null);
   const [description, setDescription] = useState('');
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [totalAmount, setTotalAmount] = useState(0);
@@ -63,12 +65,12 @@ export function OrderNewPage() {
     e.preventDefault();
     setError(null);
     if (!description.trim()) return setError('Description obligatoire');
-    if (!customerName.trim() || !customerPhone.trim()) return setError('Nom et téléphone obligatoires');
     if (totalAmount <= 0) return setError('Montant total > 0');
     setSubmitting(true);
     try {
+      // Nom et GSM facultatifs : sans GSM, une fiche « client de passage » est créée.
       const cust = await api.post('/customers/lookup-or-create', {
-        fullName: customerName, phone: customerPhone,
+        fullName: customerName.trim(), phone: customerPhone.replace(/\D/g, '').length >= 8 ? customerPhone : null,
       });
       const r = await api.post('/orders', {
         shopId, customerId: cust.data.customer.id,
@@ -78,6 +80,7 @@ export function OrderNewPage() {
         deliveryTime: deliveryTime || null,
         assignedToId: assignedToId || null,
         internalNotes: internalNotes || null,
+        notifyMode,
         serviceIds, lineItems: [],
         paymentMethod: paidAmount > 0 ? paymentMethod : undefined,
       });
@@ -132,6 +135,14 @@ export function OrderNewPage() {
     }
   };
 
+  const addService = async () => {
+    if (!newService?.trim()) return;
+    const r = await api.post('/services', { name: newService.trim() });
+    setServices((p) => [...p, r.data.service]);
+    setServiceIds((p) => [...p, r.data.service.id]);
+    setNewService(null);
+  };
+
   const due = totalAmount - paidAmount;
   const toggleService = (id: string) => setServiceIds((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
 
@@ -172,11 +183,25 @@ export function OrderNewPage() {
           </Section>
 
           <Section title="CLIENT">
-            <Field label="Nom complet *">
-              <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} style={inputStyle} required />
+            <Field label="Nom (facultatif)">
+              <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} style={inputStyle} />
             </Field>
-            <Field label="GSM (+216 XX XXX XXX) *">
-              <input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} style={inputStyle} required />
+            <Field label="GSM (facultatif — pour prévenir le client quand c'est prêt)">
+              <input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="+216 XX XXX XXX" inputMode="tel" style={inputStyle} />
+            </Field>
+            <Field label="Quand c'est prêt, le client veut…">
+              <div className="flex gap-2 flex-wrap">
+                {[['NONE', 'Rien de spécial'], ['CALL', '📞 Être appelé'], ['WHATSAPP', '💬 Message WhatsApp']].map(([v, l]) => (
+                  <button key={v} type="button" onClick={() => setNotifyMode(v)} style={{
+                    padding: '6px 12px', fontSize: 12, fontWeight: 600, borderRadius: 999, cursor: 'pointer',
+                    background: notifyMode === v ? COLORS.primary : '#fff', color: notifyMode === v ? '#fff' : COLORS.text,
+                    border: `1px solid ${notifyMode === v ? COLORS.primary : COLORS.border}`,
+                  }}>{l}</button>
+                ))}
+              </div>
+              {notifyMode !== 'NONE' && customerPhone.replace(/\D/g, '').length < 8 && (
+                <div style={{ fontSize: 11, color: COLORS.warning, marginTop: 6 }}>Pas de GSM : le client pourra le saisir lui-même en scannant son QR de suivi.</div>
+              )}
             </Field>
           </Section>
 
@@ -203,6 +228,20 @@ export function OrderNewPage() {
                   >
                     {s.icon} {s.name}
                   </button>
+                ))}
+                {me?.role === 'ADMIN' && (newService === null ? (
+                  <button type="button" onClick={() => setNewService('')} style={{
+                    padding: '6px 10px', fontSize: 12, fontWeight: 600, borderRadius: 999, cursor: 'pointer',
+                    background: '#fff', color: COLORS.primary, border: `1px dashed ${COLORS.primary}`,
+                  }}>+ autre service</button>
+                ) : (
+                  <span className="flex gap-1">
+                    <input autoFocus value={newService} onChange={(e) => setNewService(e.target.value)} placeholder="Nom du service"
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addService(); } }}
+                      style={{ ...inputStyle, width: 170, height: 30 }} />
+                    <Button type="button" size="sm" onClick={addService}>Ajouter</Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setNewService(null)}>✕</Button>
+                  </span>
                 ))}
               </div>
             </Field>
@@ -231,7 +270,7 @@ export function OrderNewPage() {
             <Field label="Assigner à">
               <select value={assignedToId} onChange={(e) => setAssignedToId(e.target.value)} style={inputStyle}>
                 <option value="">Personne</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName} · {u.role}</option>)}
+                {users.map((u) => <option key={u.id} value={u.id}>{fullName(u)} · {u.role}</option>)}
               </select>
             </Field>
           </Section>

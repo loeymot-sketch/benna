@@ -9,6 +9,7 @@ import { signFile } from './uploads.js';
 
 const Statuses = ['RECUE','EN_ATTENTE','EN_COURS_DESIGN','VALIDATION_CLIENT','EN_PRODUCTION','EN_FINITION','PRETE','LIVREE','ANNULEE'] as const;
 const Urgencies = ['NORMAL','PRIORITAIRE','URGENT','EXPRESS'] as const;
+const NotifyModes = ['NONE','CALL','WHATSAPP'] as const;
 const PaymentStatuses = ['IMPAYE','ACOMPTE','PAYE'] as const;
 const PaymentMethods = ['ESPECES','CARTE','VIREMENT','CHEQUE','D17','EDINAR','AUTRE'] as const;
 
@@ -29,6 +30,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
       assignedToId: z.string().optional(),
       q: z.string().optional(),
       mine: z.coerce.boolean().optional(),
+      toNotify: z.string().optional(), // « 1 » : commandes prêtes dont le client attend d'être prévenu
       limit: z.coerce.number().max(200).default(100),
     });
     const f = Q.parse((req as any).query);
@@ -38,6 +40,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
     if (f.shopId) where.shopId = f.shopId;
     if (f.assignedToId) where.assignedToId = f.assignedToId;
     if (f.mine) where.assignedToId = req.user.sub;
+    if (f.toNotify === '1') { where.status = 'PRETE'; where.notifyMode = { not: 'NONE' }; where.notifiedAt = null; }
     if (f.q) {
       where.OR = [
         { ticketCode: { contains: f.q, mode: 'insensitive' as const } },
@@ -101,6 +104,7 @@ export default async function ordersRoutes(app: FastifyInstance) {
       deliveryTime: z.string().optional().nullable(),
       internalNotes: z.string().optional().nullable(),
       assignedToId: z.string().optional().nullable(),
+      notifyMode: z.enum(NotifyModes).optional(),
       serviceIds: z.array(z.string()).default([]),
       lineItems: z.array(z.object({
         catalogItemId: z.string().optional().nullable(),
@@ -140,6 +144,8 @@ export default async function ordersRoutes(app: FastifyInstance) {
         deliveryDate: new Date(data.deliveryDate),
         deliveryTime: data.deliveryTime ?? null,
         internalNotes: data.internalNotes ?? null,
+        notifyMode: data.notifyMode ?? 'NONE',
+        notifyRequestedAt: data.notifyMode && data.notifyMode !== 'NONE' ? new Date() : null,
         createdById: req.user.sub,
         assignedToId: data.assignedToId ?? null,
         services: { create: data.serviceIds.map((sid) => ({ serviceId: sid })) },
@@ -184,6 +190,10 @@ export default async function ordersRoutes(app: FastifyInstance) {
       assignedToId: z.string().nullable().optional(),
       pouchNumber: z.string().nullable().optional(),
       productionSubStatus: z.string().nullable().optional(),
+      plannedFor: z.string().nullable().optional(),
+      plannedNote: z.string().nullable().optional(),
+      notifyMode: z.enum(NotifyModes).optional(),
+      notifyPhone: z.string().nullable().optional(),
       serviceIds: z.array(z.string()).optional(),
     });
     const data = Body.parse(req.body);
@@ -192,6 +202,8 @@ export default async function ordersRoutes(app: FastifyInstance) {
 
     const updateData: any = { ...data };
     if (data.deliveryDate) updateData.deliveryDate = new Date(data.deliveryDate);
+    if (data.plannedFor !== undefined) updateData.plannedFor = data.plannedFor ? new Date(data.plannedFor) : null;
+    if (data.notifyMode !== undefined) updateData.notifyRequestedAt = data.notifyMode === 'NONE' ? null : new Date();
     if (data.totalAmount !== undefined || data.discountAmount !== undefined) {
       const total = data.totalAmount ?? existing.totalAmount;
       const discount = data.discountAmount ?? existing.discountAmount;
@@ -223,25 +235,67 @@ export default async function ordersRoutes(app: FastifyInstance) {
 
   app.post('/orders/:id/status', { preHandler: requireAuth }, async (req, reply) => {
     const { id } = req.params as { id: string };
-    const Body = z.object({ status: z.enum(Statuses), comment: z.string().optional() });
-    const { status, comment } = Body.parse(req.body);
+    const Body = z.object({
+      status: z.enum(Statuses), comment: z.string().optional(),
+      plannedFor: z.string().nullable().optional(), // « prévu pour » la nouvelle étape
+      plannedNote: z.string().nullable().optional(),
+    });
+    const { status, comment, plannedFor, plannedNote } = Body.parse(req.body);
     const existing = await prisma.order.findUnique({ where: { id } });
     if (!existing) return reply.code(404).send({ error: 'not_found' });
-    if (existing.status === status) return { order: existing };
+    if (existing.status === status && plannedFor === undefined && plannedNote === undefined) return { order: existing };
     const order = await prisma.$transaction(async (tx) => {
+      if (existing.status === status) {
+        // même étape : on met seulement à jour la date prévue
+        return tx.order.update({ where: { id }, data: {
+          plannedFor: plannedFor ? new Date(plannedFor) : null, plannedNote: plannedNote ?? null,
+        }, include: { customer: true } });
+      }
       await tx.orderStatusHistory.create({
         data: {
           orderId: id, fromStatus: existing.status, toStatus: status,
           changedById: req.user.sub, comment: comment ?? null,
         },
       });
-      return tx.order.update({ where: { id }, data: { status }, include: { customer: true } });
+      const updated = await tx.order.update({
+        where: { id },
+        data: {
+          status,
+          plannedFor: plannedFor ? new Date(plannedFor) : null, // une nouvelle étape repart sans date annoncée
+          plannedNote: plannedNote ?? null,
+          ...(status === 'PRETE' ? { notifiedAt: null } : {}),
+        },
+        include: { customer: true },
+      });
+      // Client qui veut être prévenu : on garde une trace « à envoyer » (WhatsApp automatique plus tard).
+      if (status === 'PRETE' && existing.notifyMode !== 'NONE') {
+        const recipient = existing.notifyPhone ?? updated.customer.phone ?? '';
+        await tx.notification.create({ data: {
+          orderId: id, channel: existing.notifyMode, recipient,
+          message: `Votre commande ${existing.ticketCode} est prête.`, status: 'PENDING',
+        } });
+      }
+      return updated;
     });
     await audit({
       userId: req.user.sub, action: 'ORDER_STATUS_CHANGED',
       entityType: 'Order', entityId: id, payload: { from: existing.status, to: status },
     });
     await emit('order.status_changed', { id, from: existing.status, to: status });
+    return { order };
+  });
+
+  // L'équipe a prévenu le client (appel passé / message envoyé)
+  app.post('/orders/:id/notified', { preHandler: requireAuth }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const Body = z.object({ done: z.boolean().default(true) });
+    const { done } = Body.parse(req.body ?? {});
+    const existing = await prisma.order.findUnique({ where: { id } });
+    if (!existing) return reply.code(404).send({ error: 'not_found' });
+    const order = await prisma.order.update({ where: { id }, data: { notifiedAt: done ? new Date() : null } });
+    if (done) await prisma.notification.updateMany({ where: { orderId: id, status: 'PENDING' }, data: { status: 'SENT', sentAt: new Date() } });
+    await audit({ userId: req.user.sub, action: 'ORDER_CLIENT_NOTIFIED', entityType: 'Order', entityId: id, payload: { done } });
+    await emit('order.updated', { id });
     return { order };
   });
 
@@ -298,18 +352,19 @@ export default async function ordersRoutes(app: FastifyInstance) {
     const tomorrow = new Date(start); tomorrow.setDate(tomorrow.getDate() + 1);
     const dayAfter = new Date(start); dayAfter.setDate(dayAfter.getDate() + 2);
 
-    const [urgent, dueToday, dueTomorrow, late, openCount, statusBreakdown] = await Promise.all([
+    const [urgent, dueToday, dueTomorrow, late, openCount, statusBreakdown, toNotify] = await Promise.all([
       prisma.order.count({ where: { deletedAt: null, urgency: { in: ['URGENT','EXPRESS'] }, status: { notIn: ['LIVREE','ANNULEE'] } } }),
       prisma.order.count({ where: { deletedAt: null, deliveryDate: { gte: start, lt: tomorrow }, status: { notIn: ['LIVREE','ANNULEE'] } } }),
       prisma.order.count({ where: { deletedAt: null, deliveryDate: { gte: tomorrow, lt: dayAfter }, status: { notIn: ['LIVREE','ANNULEE'] } } }),
       prisma.order.count({ where: { deletedAt: null, deliveryDate: { lt: start }, status: { notIn: ['LIVREE','ANNULEE'] } } }),
       prisma.order.count({ where: { deletedAt: null, status: { notIn: ['LIVREE','ANNULEE'] } } }),
       prisma.order.groupBy({ by: ['status'], where: { deletedAt: null }, _count: true }),
+      prisma.order.count({ where: { deletedAt: null, status: 'PRETE', notifyMode: { not: 'NONE' }, notifiedAt: null } }),
     ]);
 
     return {
       counters: {
-        urgent, dueToday, dueTomorrow, late, openCount,
+        urgent, dueToday, dueTomorrow, late, openCount, toNotify,
       },
       statusBreakdown,
     };

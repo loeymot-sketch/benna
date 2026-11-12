@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, StatusPill, Button } from '../components/Atoms';
-import { COLORS, fmtTND, fmtDate, fmtPhone } from '../lib/tokens';
+import { COLORS, fmtTND, fmtDate, fmtPhone, clientName } from '../lib/tokens';
 
 export function CustomersPage() {
   const [customers, setCustomers] = useState<any[]>([]);
@@ -33,8 +33,8 @@ export function CustomersPage() {
           <tbody>
             {customers.map((c) => (
               <tr key={c.id} onClick={() => navigate(`/customers/${c.id}`)} className="cursor-pointer hover:bg-bg" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
-                <td style={{ padding: 12, fontWeight: 600 }}>{c.fullName}</td>
-                <td style={{ padding: 12, fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, whiteSpace: 'nowrap' }}>{fmtPhone(c.phone)}</td>
+                <td style={{ padding: 12, fontWeight: 600 }}>{clientName(c)}</td>
+                <td style={{ padding: 12, fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, whiteSpace: 'nowrap' }}>{fmtPhone(c.phone) || '—'}</td>
                 <td style={{ padding: 12, color: COLORS.muted }}>{c.email ?? '—'}</td>
                 <td style={{ padding: 12 }}>
                   {(JSON.parse(c.tags ?? '[]') as string[]).map((t) => (
@@ -68,8 +68,8 @@ export function CustomerDetailPage() {
       <button onClick={() => navigate(-1)} style={{ background: 'transparent', border: 'none', color: COLORS.muted, cursor: 'pointer', fontSize: 13, marginBottom: 12 }}>
         ← Retour
       </button>
-      <div style={{ fontSize: 22, fontWeight: 700 }}>{data.fullName}</div>
-      <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 16 }}>{fmtPhone(data.phone)} {data.email && `· ${data.email}`}</div>
+      <div style={{ fontSize: 22, fontWeight: 700 }}>{clientName(data)}</div>
+      <div style={{ fontSize: 13, color: COLORS.muted, marginBottom: 16 }}>{fmtPhone(data.phone) || 'Pas de GSM'} {data.email && `· ${data.email}`}</div>
 
       <Card>
         <div style={{ padding: '14px 18px', borderBottom: `1px solid ${COLORS.border}`, fontSize: 14, fontWeight: 700 }}>

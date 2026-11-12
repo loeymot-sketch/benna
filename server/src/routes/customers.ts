@@ -4,7 +4,11 @@ import { prisma } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { audit } from '../audit.js';
 
-const PhoneSchema = z.string().min(8).max(20);
+// Le GSM est facultatif : chaîne vide ou absente = pas de numéro.
+const PhoneSchema = z.string().max(30).optional().nullable().transform((v) => {
+  const digits = (v ?? '').replace(/\D/g, '');
+  return digits.length >= 8 ? v! : null;
+});
 
 function normalizePhone(raw: string) {
   const digits = raw.replace(/\D/g, '');
@@ -56,19 +60,19 @@ export default async function customersRoutes(app: FastifyInstance) {
 
   app.post('/customers', { preHandler: requireAuth }, async (req, reply) => {
     const Body = z.object({
-      fullName: z.string().min(1),
+      fullName: z.string().optional().default(''),
       phone: PhoneSchema,
-      email: z.string().email().optional().nullable(),
+      email: z.string().email().optional().nullable().or(z.literal('').transform(() => null)),
       notes: z.string().optional().nullable(),
       tags: z.array(z.string()).optional().default([]),
     });
     const data = Body.parse(req.body);
-    const phone = normalizePhone(data.phone);
-    const existing = await prisma.customer.findUnique({ where: { phone } });
+    const phone = data.phone ? normalizePhone(data.phone) : null;
+    const existing = phone ? await prisma.customer.findUnique({ where: { phone } }) : null;
     if (existing) return reply.code(409).send({ error: 'phone_exists', customer: existing });
     const customer = await prisma.customer.create({
       data: {
-        fullName: data.fullName,
+        fullName: data.fullName.trim(),
         phone,
         email: data.email ?? null,
         notes: data.notes ?? null,
@@ -82,16 +86,19 @@ export default async function customersRoutes(app: FastifyInstance) {
   // Find or auto-create — used by order creation flow
   app.post('/customers/lookup-or-create', { preHandler: requireAuth }, async (req) => {
     const Body = z.object({
-      fullName: z.string().min(1),
+      fullName: z.string().optional().default(''),
       phone: PhoneSchema,
-      email: z.string().email().optional().nullable(),
+      email: z.string().email().optional().nullable().or(z.literal('').transform(() => null)),
     });
     const data = Body.parse(req.body);
-    const phone = normalizePhone(data.phone);
-    let c = await prisma.customer.findUnique({ where: { phone } });
+    const name = data.fullName.trim();
+    const phone = data.phone ? normalizePhone(data.phone) : null;
+    // Avec GSM : on retrouve le client existant. Sans GSM : nouvelle fiche (client de passage).
+    let c = phone ? await prisma.customer.findUnique({ where: { phone } }) : null;
+    if (c && !c.fullName && name) c = await prisma.customer.update({ where: { id: c.id }, data: { fullName: name } });
     if (!c) {
       c = await prisma.customer.create({
-        data: { fullName: data.fullName, phone, email: data.email ?? null, tags: '[]' },
+        data: { fullName: name, phone, email: data.email ?? null, tags: '[]' },
       });
       await audit({ userId: req.user.sub, action: 'CUSTOMER_CREATED', entityType: 'Customer', entityId: c.id });
     }

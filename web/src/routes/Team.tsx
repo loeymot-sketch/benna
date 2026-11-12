@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { Card, Avatar, Button } from '../components/Atoms';
-import { COLORS, ROLE_LABELS } from '../lib/tokens';
+import { COLORS, ROLE_LABELS, fullName } from '../lib/tokens';
 
 export function TeamPage() {
   const [users, setUsers] = useState<any[]>([]);
@@ -59,7 +59,7 @@ export function TeamPage() {
                   <div className="flex items-center gap-2.5">
                     <Avatar firstName={u.firstName} lastName={u.lastName} size={28} />
                     <div>
-                      <div style={{ fontWeight: 600 }}>{u.firstName} {u.lastName}</div>
+                      <div style={{ fontWeight: 600 }}>{fullName(u)}</div>
                     </div>
                   </div>
                 </td>
@@ -111,7 +111,7 @@ function SetPinModal({ user, onClose, onDone }: { user: any; onClose: () => void
   return (
     <div className="fixed inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)', zIndex: 100 }}>
       <Card style={{ padding: 24, width: 420 }}>
-        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Définir un PIN pour {user.firstName}</div>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Définir un PIN pour {fullName(user)}</div>
         <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 18 }}>
           {user.role === 'ADMIN' ? '6 chiffres (admin)' : '4 chiffres'} · le membre devra choisir son propre code à sa prochaine connexion.
         </div>
@@ -155,12 +155,12 @@ function AddMemberModal({ shops, onClose, onCreated }: { shops: any[]; onClose: 
     <div className="fixed inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)', zIndex: 100 }}>
       <Card style={{ padding: 24, width: 480 }}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Ajouter un membre</div>
-        <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 18 }}>Le membre choisira lui-même son PIN à la 1ère connexion.</div>
+        <div style={{ fontSize: 12, color: COLORS.muted, marginBottom: 18 }}>Nom et prénom sont facultatifs. Le membre choisira lui-même son PIN à la 1ère connexion.</div>
         <form onSubmit={submit} className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
-            <input placeholder="Prénom" value={firstName} onChange={(e) => setFirstName(e.target.value)} required
+            <input placeholder="Prénom (facultatif)" value={firstName} onChange={(e) => setFirstName(e.target.value)}
               style={{ height: 38, padding: '0 12px', borderRadius: 8, border: `1px solid ${COLORS.border}`, fontSize: 14 }} />
-            <input placeholder="Nom" value={lastName} onChange={(e) => setLastName(e.target.value)} required
+            <input placeholder="Nom (facultatif)" value={lastName} onChange={(e) => setLastName(e.target.value)}
               style={{ height: 38, padding: '0 12px', borderRadius: 8, border: `1px solid ${COLORS.border}`, fontSize: 14 }} />
           </div>
           <select value={role} onChange={(e) => setRole(e.target.value)}

@@ -19,8 +19,8 @@ model User {
   pinHash         String
   pinSet          Boolean   @default(false) // false until first login pick
   mustChangePin   Boolean   @default(false) // true: code temporaire remis par un admin, à changer à la 1ère connexion
-  firstName       String
-  lastName        String
+  firstName       String    @default("")
+  lastName        String    @default("")
   avatar          String?
   role            String    // ADMIN | MANAGER | RECEPTION | DESIGNER | PRODUCTION | PHOTOGRAPHER
   shopId          String?
@@ -62,8 +62,8 @@ model Shop {
 
 model Customer {
   id        String   @id @default(cuid())
-  fullName  String
-  phone     String   @unique
+  fullName  String   @default("") // optionnel : vide = client sans nom
+  phone     String?  @unique       // optionnel (plusieurs NULL autorisés par Postgres)
   email     String?
   notes     String?
   tags      String   @default("[]") // JSON array of strings
@@ -76,6 +76,7 @@ model Service {
   code   String  @unique
   name   String
   icon   String?
+  isActive Boolean @default(true)
   catalogItems CatalogItem[]
   orders ServiceOnOrder[]
 }
@@ -115,6 +116,12 @@ model Order {
   urgency         String   // NORMAL | PRIORITAIRE | URGENT | EXPRESS
   status          String   // RECUE | EN_ATTENTE | EN_COURS_DESIGN | VALIDATION_CLIENT | EN_PRODUCTION | EN_FINITION | PRETE | LIVREE | ANNULEE
   productionSubStatus String?
+  plannedFor      DateTime?  // « prévu pour » : date annoncée pour l'étape en cours (affichée au client)
+  plannedNote     String?    // précision libre (ex. « après-midi »)
+  notifyMode      String     @default("NONE") // NONE | CALL | WHATSAPP : choix du client pour être prévenu quand c'est prêt
+  notifyPhone     String?    // numéro donné par le client sur la page de suivi (si absent de la fiche)
+  notifyRequestedAt DateTime?
+  notifiedAt      DateTime?  // quand l'équipe a prévenu le client (appel / WhatsApp)
   deliveryDate    DateTime
   deliveryTime    String?
   internalNotes   String?
@@ -195,7 +202,7 @@ model Notification {
   id        String   @id @default(cuid())
   orderId   String?
   order     Order?   @relation(fields: [orderId], references: [id])
-  channel   String   // SMS | WHATSAPP | EMAIL
+  channel   String   // CALL | WHATSAPP | SMS | EMAIL
   recipient String
   message   String
   status    String   // PENDING | SENT | FAILED

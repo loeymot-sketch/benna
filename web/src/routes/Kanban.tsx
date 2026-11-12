@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { DndContext, DragEndEvent, useDraggable, useDroppable } from '@dnd-kit/core';
 import { api } from '../lib/api';
 import { Card, StatusPill, UrgencyDot } from '../components/Atoms';
-import { COLORS, fmtDate } from '../lib/tokens';
+import { COLORS, fmtDate, clientName } from '../lib/tokens';
 import { getSocket } from '../lib/socket';
 
 const COLUMNS = [
@@ -114,7 +114,7 @@ function OrderCard({ order, onClick }: { order: any; onClick: () => void }) {
         </div>
         <UrgencyDot level={order.urgency} />
       </div>
-      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>{order.customer?.fullName}</div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4 }}>{clientName(order.customer)}</div>
       <div style={{ fontSize: 11, color: COLORS.muted, lineHeight: 1.35, maxHeight: 32, overflow: 'hidden' }}>
         {order.description.slice(0, 80)}
       </div>
@@ -126,7 +126,7 @@ function OrderCard({ order, onClick }: { order: any; onClick: () => void }) {
             background: 'linear-gradient(135deg,#f59e0b,#dc2626)',
             width: 22, height: 22, borderRadius: 999,
           }} className="flex items-center justify-center">
-            {order.assignedTo.firstName[0]}{order.assignedTo.lastName[0]}
+            {order.assignedTo.firstName?.[0]}{order.assignedTo.lastName?.[0]}
           </div>
         )}
       </div>

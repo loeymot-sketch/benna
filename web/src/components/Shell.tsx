@@ -16,6 +16,7 @@ const NAV = [
   { id: 'customers', to: '/customers', label: 'Clients', icon: 'users' },
   { id: 'carnet',    to: '/carnet', label: 'Le Carnet', icon: 'book' },
   { id: 'cash',      to: '/cash', label: 'Caisse & CA', icon: 'cash', adminOnly: true, lock: true },
+  { id: 'services',  to: '/services', label: 'Services & prix', icon: 'list', adminOnly: true },
   { id: 'team',      to: '/team', label: 'Équipe', icon: 'team', adminOnly: true },
 ];
 
@@ -307,6 +308,7 @@ function TopBar({ inboxCount }: { inboxCount: number }) {
     '/carnet': { title: 'Le Carnet', subtitle: 'Communication interne · passations · alertes' },
     '/carnet/inbox': { title: 'Pour Moi', subtitle: 'Items à traiter' },
     '/cash': { title: 'Caisse & chiffre d\'affaires', subtitle: 'Réservé aux admins · protégé par ton code' },
+    '/services': { title: 'Services & prix', subtitle: 'Ajouter des services et articles du catalogue' },
     '/team': { title: 'Équipe', subtitle: 'Gestion des membres et permissions' },
     '/profile': { title: 'Mon profil', subtitle: 'Changer mon PIN, voir ma session' },
   };

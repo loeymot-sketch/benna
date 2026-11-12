@@ -56623,16 +56623,16 @@ async function usersRoutes(app) {
   });
   app.post("/admin/users", { preHandler: [requireAuth, requireRole("ADMIN")] }, async (req, reply) => {
     const Body = external_exports.object({
-      firstName: external_exports.string().min(1),
-      lastName: external_exports.string().min(1),
+      firstName: external_exports.string().optional().default(""),
+      lastName: external_exports.string().optional().default(""),
       role: external_exports.enum(["ADMIN", "MANAGER", "RECEPTION", "DESIGNER", "PRODUCTION", "PHOTOGRAPHER"]),
       shopId: external_exports.string().nullable().optional()
     });
     const data = Body.parse(req.body);
     const user = await prisma.user.create({
       data: {
-        firstName: data.firstName,
-        lastName: data.lastName,
+        firstName: data.firstName.trim(),
+        lastName: data.lastName.trim(),
         role: data.role,
         shopId: data.shopId ?? null,
         pinHash: "__not_set__",
@@ -56690,7 +56690,10 @@ async function usersRoutes(app) {
 }
 
 // server/src/routes/customers.ts
-var PhoneSchema = external_exports.string().min(8).max(20);
+var PhoneSchema = external_exports.string().max(30).optional().nullable().transform((v) => {
+  const digits = (v ?? "").replace(/\D/g, "");
+  return digits.length >= 8 ? v : null;
+});
 function normalizePhone(raw) {
   const digits = raw.replace(/\D/g, "");
   if (digits.startsWith("216")) return `+${digits}`;
@@ -56742,19 +56745,19 @@ async function customersRoutes(app) {
   });
   app.post("/customers", { preHandler: requireAuth }, async (req, reply) => {
     const Body = external_exports.object({
-      fullName: external_exports.string().min(1),
+      fullName: external_exports.string().optional().default(""),
       phone: PhoneSchema,
-      email: external_exports.string().email().optional().nullable(),
+      email: external_exports.string().email().optional().nullable().or(external_exports.literal("").transform(() => null)),
       notes: external_exports.string().optional().nullable(),
       tags: external_exports.array(external_exports.string()).optional().default([])
     });
     const data = Body.parse(req.body);
-    const phone = normalizePhone(data.phone);
-    const existing = await prisma.customer.findUnique({ where: { phone } });
+    const phone = data.phone ? normalizePhone(data.phone) : null;
+    const existing = phone ? await prisma.customer.findUnique({ where: { phone } }) : null;
     if (existing) return reply.code(409).send({ error: "phone_exists", customer: existing });
     const customer = await prisma.customer.create({
       data: {
-        fullName: data.fullName,
+        fullName: data.fullName.trim(),
         phone,
         email: data.email ?? null,
         notes: data.notes ?? null,
@@ -56766,16 +56769,18 @@ async function customersRoutes(app) {
   });
   app.post("/customers/lookup-or-create", { preHandler: requireAuth }, async (req) => {
     const Body = external_exports.object({
-      fullName: external_exports.string().min(1),
+      fullName: external_exports.string().optional().default(""),
       phone: PhoneSchema,
-      email: external_exports.string().email().optional().nullable()
+      email: external_exports.string().email().optional().nullable().or(external_exports.literal("").transform(() => null))
     });
     const data = Body.parse(req.body);
-    const phone = normalizePhone(data.phone);
-    let c = await prisma.customer.findUnique({ where: { phone } });
+    const name = data.fullName.trim();
+    const phone = data.phone ? normalizePhone(data.phone) : null;
+    let c = phone ? await prisma.customer.findUnique({ where: { phone } }) : null;
+    if (c && !c.fullName && name) c = await prisma.customer.update({ where: { id: c.id }, data: { fullName: name } });
     if (!c) {
       c = await prisma.customer.create({
-        data: { fullName: data.fullName, phone, email: data.email ?? null, tags: "[]" }
+        data: { fullName: name, phone, email: data.email ?? null, tags: "[]" }
       });
       await audit({ userId: req.user.sub, action: "CUSTOMER_CREATED", entityType: "Customer", entityId: c.id });
     }
@@ -56872,6 +56877,7 @@ async function uploadsRoutes(app) {
 // server/src/routes/orders.ts
 var Statuses = ["RECUE", "EN_ATTENTE", "EN_COURS_DESIGN", "VALIDATION_CLIENT", "EN_PRODUCTION", "EN_FINITION", "PRETE", "LIVREE", "ANNULEE"];
 var Urgencies = ["NORMAL", "PRIORITAIRE", "URGENT", "EXPRESS"];
+var NotifyModes = ["NONE", "CALL", "WHATSAPP"];
 var PaymentMethods = ["ESPECES", "CARTE", "VIREMENT", "CHEQUE", "D17", "EDINAR", "AUTRE"];
 function computePaymentStatus(total, paid, discount) {
   const due = total - discount;
@@ -56888,6 +56894,8 @@ async function ordersRoutes(app) {
       assignedToId: external_exports.string().optional(),
       q: external_exports.string().optional(),
       mine: external_exports.coerce.boolean().optional(),
+      toNotify: external_exports.string().optional(),
+      // « 1 » : commandes prêtes dont le client attend d'être prévenu
       limit: external_exports.coerce.number().max(200).default(100)
     });
     const f = Q.parse(req.query);
@@ -56897,6 +56905,11 @@ async function ordersRoutes(app) {
     if (f.shopId) where.shopId = f.shopId;
     if (f.assignedToId) where.assignedToId = f.assignedToId;
     if (f.mine) where.assignedToId = req.user.sub;
+    if (f.toNotify === "1") {
+      where.status = "PRETE";
+      where.notifyMode = { not: "NONE" };
+      where.notifiedAt = null;
+    }
     if (f.q) {
       where.OR = [
         { ticketCode: { contains: f.q, mode: "insensitive" } },
@@ -56961,6 +56974,7 @@ async function ordersRoutes(app) {
       deliveryTime: external_exports.string().optional().nullable(),
       internalNotes: external_exports.string().optional().nullable(),
       assignedToId: external_exports.string().optional().nullable(),
+      notifyMode: external_exports.enum(NotifyModes).optional(),
       serviceIds: external_exports.array(external_exports.string()).default([]),
       lineItems: external_exports.array(external_exports.object({
         catalogItemId: external_exports.string().optional().nullable(),
@@ -56996,6 +57010,8 @@ async function ordersRoutes(app) {
         deliveryDate: new Date(data.deliveryDate),
         deliveryTime: data.deliveryTime ?? null,
         internalNotes: data.internalNotes ?? null,
+        notifyMode: data.notifyMode ?? "NONE",
+        notifyRequestedAt: data.notifyMode && data.notifyMode !== "NONE" ? /* @__PURE__ */ new Date() : null,
         createdById: req.user.sub,
         assignedToId: data.assignedToId ?? null,
         services: { create: data.serviceIds.map((sid) => ({ serviceId: sid })) },
@@ -57038,6 +57054,10 @@ async function ordersRoutes(app) {
       assignedToId: external_exports.string().nullable().optional(),
       pouchNumber: external_exports.string().nullable().optional(),
       productionSubStatus: external_exports.string().nullable().optional(),
+      plannedFor: external_exports.string().nullable().optional(),
+      plannedNote: external_exports.string().nullable().optional(),
+      notifyMode: external_exports.enum(NotifyModes).optional(),
+      notifyPhone: external_exports.string().nullable().optional(),
       serviceIds: external_exports.array(external_exports.string()).optional()
     });
     const data = Body.parse(req.body);
@@ -57045,6 +57065,8 @@ async function ordersRoutes(app) {
     if (!existing) return reply.code(404).send({ error: "not_found" });
     const updateData = { ...data };
     if (data.deliveryDate) updateData.deliveryDate = new Date(data.deliveryDate);
+    if (data.plannedFor !== void 0) updateData.plannedFor = data.plannedFor ? new Date(data.plannedFor) : null;
+    if (data.notifyMode !== void 0) updateData.notifyRequestedAt = data.notifyMode === "NONE" ? null : /* @__PURE__ */ new Date();
     if (data.totalAmount !== void 0 || data.discountAmount !== void 0) {
       const total = data.totalAmount ?? existing.totalAmount;
       const discount = data.discountAmount ?? existing.discountAmount;
@@ -57076,12 +57098,24 @@ async function ordersRoutes(app) {
   });
   app.post("/orders/:id/status", { preHandler: requireAuth }, async (req, reply) => {
     const { id } = req.params;
-    const Body = external_exports.object({ status: external_exports.enum(Statuses), comment: external_exports.string().optional() });
-    const { status, comment } = Body.parse(req.body);
+    const Body = external_exports.object({
+      status: external_exports.enum(Statuses),
+      comment: external_exports.string().optional(),
+      plannedFor: external_exports.string().nullable().optional(),
+      // « prévu pour » la nouvelle étape
+      plannedNote: external_exports.string().nullable().optional()
+    });
+    const { status, comment, plannedFor, plannedNote } = Body.parse(req.body);
     const existing = await prisma.order.findUnique({ where: { id } });
     if (!existing) return reply.code(404).send({ error: "not_found" });
-    if (existing.status === status) return { order: existing };
+    if (existing.status === status && plannedFor === void 0 && plannedNote === void 0) return { order: existing };
     const order = await prisma.$transaction(async (tx) => {
+      if (existing.status === status) {
+        return tx.order.update({ where: { id }, data: {
+          plannedFor: plannedFor ? new Date(plannedFor) : null,
+          plannedNote: plannedNote ?? null
+        }, include: { customer: true } });
+      }
       await tx.orderStatusHistory.create({
         data: {
           orderId: id,
@@ -57091,7 +57125,28 @@ async function ordersRoutes(app) {
           comment: comment ?? null
         }
       });
-      return tx.order.update({ where: { id }, data: { status }, include: { customer: true } });
+      const updated = await tx.order.update({
+        where: { id },
+        data: {
+          status,
+          plannedFor: plannedFor ? new Date(plannedFor) : null,
+          // une nouvelle étape repart sans date annoncée
+          plannedNote: plannedNote ?? null,
+          ...status === "PRETE" ? { notifiedAt: null } : {}
+        },
+        include: { customer: true }
+      });
+      if (status === "PRETE" && existing.notifyMode !== "NONE") {
+        const recipient = existing.notifyPhone ?? updated.customer.phone ?? "";
+        await tx.notification.create({ data: {
+          orderId: id,
+          channel: existing.notifyMode,
+          recipient,
+          message: `Votre commande ${existing.ticketCode} est pr\xEAte.`,
+          status: "PENDING"
+        } });
+      }
+      return updated;
     });
     await audit({
       userId: req.user.sub,
@@ -57101,6 +57156,18 @@ async function ordersRoutes(app) {
       payload: { from: existing.status, to: status }
     });
     await emit("order.status_changed", { id, from: existing.status, to: status });
+    return { order };
+  });
+  app.post("/orders/:id/notified", { preHandler: requireAuth }, async (req, reply) => {
+    const { id } = req.params;
+    const Body = external_exports.object({ done: external_exports.boolean().default(true) });
+    const { done } = Body.parse(req.body ?? {});
+    const existing = await prisma.order.findUnique({ where: { id } });
+    if (!existing) return reply.code(404).send({ error: "not_found" });
+    const order = await prisma.order.update({ where: { id }, data: { notifiedAt: done ? /* @__PURE__ */ new Date() : null } });
+    if (done) await prisma.notification.updateMany({ where: { orderId: id, status: "PENDING" }, data: { status: "SENT", sentAt: /* @__PURE__ */ new Date() } });
+    await audit({ userId: req.user.sub, action: "ORDER_CLIENT_NOTIFIED", entityType: "Order", entityId: id, payload: { done } });
+    await emit("order.updated", { id });
     return { order };
   });
   app.post("/orders/:id/payments", { preHandler: requireAuth }, async (req, reply) => {
@@ -57161,13 +57228,14 @@ async function ordersRoutes(app) {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const dayAfter = new Date(start);
     dayAfter.setDate(dayAfter.getDate() + 2);
-    const [urgent, dueToday, dueTomorrow, late2, openCount, statusBreakdown] = await Promise.all([
+    const [urgent, dueToday, dueTomorrow, late2, openCount, statusBreakdown, toNotify] = await Promise.all([
       prisma.order.count({ where: { deletedAt: null, urgency: { in: ["URGENT", "EXPRESS"] }, status: { notIn: ["LIVREE", "ANNULEE"] } } }),
       prisma.order.count({ where: { deletedAt: null, deliveryDate: { gte: start, lt: tomorrow }, status: { notIn: ["LIVREE", "ANNULEE"] } } }),
       prisma.order.count({ where: { deletedAt: null, deliveryDate: { gte: tomorrow, lt: dayAfter }, status: { notIn: ["LIVREE", "ANNULEE"] } } }),
       prisma.order.count({ where: { deletedAt: null, deliveryDate: { lt: start }, status: { notIn: ["LIVREE", "ANNULEE"] } } }),
       prisma.order.count({ where: { deletedAt: null, status: { notIn: ["LIVREE", "ANNULEE"] } } }),
-      prisma.order.groupBy({ by: ["status"], where: { deletedAt: null }, _count: true })
+      prisma.order.groupBy({ by: ["status"], where: { deletedAt: null }, _count: true }),
+      prisma.order.count({ where: { deletedAt: null, status: "PRETE", notifyMode: { not: "NONE" }, notifiedAt: null } })
     ]);
     return {
       counters: {
@@ -57175,7 +57243,8 @@ async function ordersRoutes(app) {
         dueToday,
         dueTomorrow,
         late: late2,
-        openCount
+        openCount,
+        toNotify
       },
       statusBreakdown
     };
@@ -57450,7 +57519,7 @@ async function trackRoutes(app) {
     const order = await prisma.order.findUnique({
       where: { ticketCode: code.toUpperCase() },
       include: {
-        customer: { select: { fullName: true } },
+        customer: { select: { fullName: true, phone: true } },
         statusHistory: { orderBy: { createdAt: "asc" } }
       }
     });
@@ -57458,7 +57527,14 @@ async function trackRoutes(app) {
     const dueAmount = order.totalAmount - order.discountAmount - order.paidAmount;
     return {
       ticketCode: order.ticketCode,
-      customerFirstName: order.customer.fullName.split(" ")[0],
+      customerFirstName: order.customer.fullName.trim().split(" ")[0] ?? "",
+      plannedFor: order.plannedFor,
+      plannedNote: order.plannedNote,
+      totalAmount: order.totalAmount,
+      discountAmount: order.discountAmount,
+      paidAmount: order.paidAmount,
+      notifyMode: order.notifyMode,
+      hasPhone: !!(order.customer.phone || order.notifyPhone),
       status: order.status,
       urgency: order.urgency,
       deliveryDate: order.deliveryDate,
@@ -57470,6 +57546,26 @@ async function trackRoutes(app) {
       }))
     };
   });
+  app.post("/track/:code/notify", async (req, reply) => {
+    const { code } = req.params;
+    const Body = external_exports.object({
+      mode: external_exports.enum(["NONE", "CALL", "WHATSAPP"]),
+      phone: external_exports.string().max(30).optional().nullable()
+    });
+    const { mode, phone } = Body.parse(req.body);
+    const order = await prisma.order.findUnique({ where: { ticketCode: code.toUpperCase() }, include: { customer: true } });
+    if (!order || order.deletedAt) return reply.code(404).send({ error: "not_found" });
+    const digits = (phone ?? "").replace(/\D/g, "");
+    let notifyPhone = order.notifyPhone;
+    if (digits.length >= 8) notifyPhone = digits.startsWith("216") ? `+${digits}` : digits.length === 8 ? `+216${digits}` : `+${digits}`;
+    if (mode !== "NONE" && !order.customer.phone && !notifyPhone) return reply.code(400).send({ error: "phone_required" });
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { notifyMode: mode, notifyPhone, notifyRequestedAt: mode === "NONE" ? null : /* @__PURE__ */ new Date() }
+    });
+    await emit("order.updated", { id: order.id });
+    return { ok: true, notifyMode: mode };
+  });
   app.get("/track/:code/qr.png", async (req, reply) => {
     const { code } = req.params;
     const url = `${process.env.PUBLIC_BASE_URL ?? "http://localhost:5173"}/track/${code.toUpperCase()}`;
@@ -57480,18 +57576,71 @@ async function trackRoutes(app) {
 }
 
 // server/src/routes/catalog.ts
+var admin = [requireAuth, requireRole("ADMIN")];
+async function uniqueCode(name) {
+  const base = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30) || "SERVICE";
+  let code = base;
+  for (let i = 2; await prisma.service.findUnique({ where: { code } }); i++) code = `${base}_${i}`;
+  return code;
+}
 async function catalogRoutes(app) {
-  app.get("/services", { preHandler: requireAuth }, async () => {
-    const services = await prisma.service.findMany({ orderBy: { name: "asc" } });
+  app.get("/services", { preHandler: requireAuth }, async (req) => {
+    const all = req.query?.all === "1" && req.user.role === "ADMIN";
+    const services = await prisma.service.findMany({
+      where: all ? {} : { isActive: true },
+      orderBy: { name: "asc" },
+      include: { _count: { select: { orders: true, catalogItems: true } } }
+    });
     return { services };
   });
-  app.get("/catalog", { preHandler: requireAuth }, async () => {
+  app.post("/services", { preHandler: admin }, async (req) => {
+    const Body = external_exports.object({ name: external_exports.string().trim().min(1), icon: external_exports.string().trim().max(8).optional().nullable() });
+    const data = Body.parse(req.body);
+    const service = await prisma.service.create({ data: { name: data.name, icon: data.icon || "\u2728", code: await uniqueCode(data.name) } });
+    await audit({ userId: req.user.sub, action: "SERVICE_CREATED", entityType: "Service", entityId: service.id, payload: data });
+    return { service };
+  });
+  app.patch("/services/:id", { preHandler: admin }, async (req, reply) => {
+    const { id } = req.params;
+    const Body = external_exports.object({
+      name: external_exports.string().trim().min(1).optional(),
+      icon: external_exports.string().trim().max(8).nullable().optional(),
+      isActive: external_exports.boolean().optional()
+    });
+    const data = Body.parse(req.body);
+    if (!await prisma.service.findUnique({ where: { id } })) return reply.code(404).send({ error: "not_found" });
+    const service = await prisma.service.update({ where: { id }, data });
+    await audit({ userId: req.user.sub, action: "SERVICE_UPDATED", entityType: "Service", entityId: id, payload: data });
+    return { service };
+  });
+  app.get("/catalog", { preHandler: requireAuth }, async (req) => {
+    const all = req.query?.all === "1" && req.user.role === "ADMIN";
     const items = await prisma.catalogItem.findMany({
-      where: { isActive: true },
+      where: all ? {} : { isActive: true },
       include: { service: true },
       orderBy: { name: "asc" }
     });
     return { items };
+  });
+  const ItemBody = external_exports.object({
+    name: external_exports.string().trim().min(1),
+    serviceId: external_exports.string(),
+    unitPrice: external_exports.number().nonnegative(),
+    unit: external_exports.string().trim().min(1).default("unit\xE9")
+  });
+  app.post("/catalog", { preHandler: admin }, async (req) => {
+    const data = ItemBody.parse(req.body);
+    const item = await prisma.catalogItem.create({ data, include: { service: true } });
+    await audit({ userId: req.user.sub, action: "CATALOG_ITEM_CREATED", entityType: "CatalogItem", entityId: item.id, payload: data });
+    return { item };
+  });
+  app.patch("/catalog/:id", { preHandler: admin }, async (req, reply) => {
+    const { id } = req.params;
+    const data = ItemBody.partial().extend({ isActive: external_exports.boolean().optional() }).parse(req.body);
+    if (!await prisma.catalogItem.findUnique({ where: { id } })) return reply.code(404).send({ error: "not_found" });
+    const item = await prisma.catalogItem.update({ where: { id }, data, include: { service: true } });
+    await audit({ userId: req.user.sub, action: "CATALOG_ITEM_UPDATED", entityType: "CatalogItem", entityId: id, payload: data });
+    return { item };
   });
   app.get("/shops", { preHandler: requireAuth }, async () => {
     const shops = await prisma.shop.findMany({ where: { isActive: true } });
@@ -57807,8 +57956,8 @@ var addDays = (d, n) => {
 };
 var net = (o) => o.totalAmount - o.discountAmount;
 async function financeRoutes(app) {
-  const admin = [requireAuth, requireRole("ADMIN")];
-  app.post("/finance/unlock", { preHandler: admin }, async (req, reply) => {
+  const admin2 = [requireAuth, requireRole("ADMIN")];
+  app.post("/finance/unlock", { preHandler: admin2 }, async (req, reply) => {
     const { pin } = external_exports.object({ pin: external_exports.string().regex(/^\d{4,6}$/) }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: req.user.sub } });
     if (!user || !user.isActive) return reply.code(404).send({ error: "user_not_found" });
@@ -57830,7 +57979,7 @@ async function financeRoutes(app) {
     await audit({ userId: user.id, action: "FINANCE_UNLOCKED", entityType: "User", entityId: user.id, ipAddress: req.ip });
     return { token, expiresInSec: FINANCE_TTL_MIN * 60 };
   });
-  app.get("/finance/summary", { preHandler: [...admin, requireFinanceToken(app)] }, async (req) => {
+  app.get("/finance/summary", { preHandler: [...admin2, requireFinanceToken(app)] }, async (req) => {
     const today = startOfDay();
     const tomorrow = addDays(today, 1);
     const weekStart = addDays(today, -6);

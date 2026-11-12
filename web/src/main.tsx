@@ -15,6 +15,7 @@ import { CarnetLayout, CarnetWall, PourMoiPage, ComposerPage, PostDetailPage } f
 import { CustomersPage, CustomerDetailPage } from './routes/Customers';
 import { CashPage } from './routes/Cash';
 import { TeamPage } from './routes/Team';
+import { ServicesPage } from './routes/Services';
 import { ScanPage } from './routes/Scan';
 import { TrackPage } from './routes/Track';
 import { ProfilePage } from './routes/Profile';
@@ -53,6 +54,7 @@ function App() {
         <Route path="/customers/:id" element={<Protected><CustomerDetailPage /></Protected>} />
         <Route path="/cash" element={<Protected><AdminOnly><CashPage /></AdminOnly></Protected>} />
         <Route path="/team" element={<Protected><AdminOnly><TeamPage /></AdminOnly></Protected>} />
+        <Route path="/services" element={<Protected><AdminOnly><ServicesPage /></AdminOnly></Protected>} />
         <Route path="/profile" element={<Protected><ProfilePage /></Protected>} />
 
         <Route path="/carnet" element={<Protected><CarnetLayout /></Protected>}>

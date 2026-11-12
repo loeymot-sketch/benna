@@ -34,16 +34,16 @@ export default async function usersRoutes(app: FastifyInstance) {
 
   app.post('/admin/users', { preHandler: [requireAuth, requireRole('ADMIN')] }, async (req, reply) => {
     const Body = z.object({
-      firstName: z.string().min(1),
-      lastName: z.string().min(1),
+      firstName: z.string().optional().default(''),
+      lastName: z.string().optional().default(''),
       role: z.enum(['ADMIN','MANAGER','RECEPTION','DESIGNER','PRODUCTION','PHOTOGRAPHER']),
       shopId: z.string().nullable().optional(),
     });
     const data = Body.parse(req.body);
     const user = await prisma.user.create({
       data: {
-        firstName: data.firstName,
-        lastName: data.lastName,
+        firstName: data.firstName.trim(),
+        lastName: data.lastName.trim(),
         role: data.role,
         shopId: data.shopId ?? null,
         pinHash: '__not_set__',

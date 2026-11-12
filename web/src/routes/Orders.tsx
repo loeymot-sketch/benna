@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, StatusPill, UrgencyDot, Button } from '../components/Atoms';
-import { COLORS, fmtTND, fmtDate, fmtPhone } from '../lib/tokens';
+import { COLORS, fmtTND, fmtDate, fmtPhone, clientName } from '../lib/tokens';
 import { getSocket } from '../lib/socket';
 
 const STATUS_FILTERS = [
@@ -20,6 +20,7 @@ export function OrdersPage() {
   const [q, setQ] = useState('');
   const [sp, setSp] = useSearchParams();
   const mine = sp.get('mine') === '1';
+  const toNotify = sp.get('toNotify') === '1';
   const navigate = useNavigate();
 
   const load = () => {
@@ -27,13 +28,14 @@ export function OrdersPage() {
     if (filter.value) params.status = filter.value;
     if (q) params.q = q;
     if (mine) params.mine = true;
+    if (toNotify) params.toNotify = '1';
     api.get('/orders', { params }).then((r) => setOrders(r.data.orders));
   };
   // Les écouteurs temps réel sont posés une seule fois : ils doivent appeler la version courante de load().
   const loadRef = useRef(load);
   loadRef.current = load;
 
-  useEffect(load, [filter, q, mine]);
+  useEffect(load, [filter, q, mine, toNotify]);
 
   useEffect(() => {
     const sock = getSocket();
@@ -60,6 +62,16 @@ export function OrdersPage() {
           }}
         >
           👤 Mes commandes
+        </button>
+        <button
+          onClick={() => setSp(toNotify ? {} : { toNotify: '1' })}
+          style={{
+            padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+            background: toNotify ? COLORS.success : '#fff', color: toNotify ? '#fff' : COLORS.text,
+            border: `1px solid ${toNotify ? COLORS.success : COLORS.border}`, cursor: 'pointer',
+          }}
+        >
+          📞 Clients à prévenir
         </button>
         {STATUS_FILTERS.map((f) => (
           <button
@@ -109,8 +121,8 @@ export function OrdersPage() {
                   {o.ticketCode}
                   {o.pouchNumber && <div style={{ fontSize: 10, color: COLORS.muted, fontWeight: 500 }}>Pochette {o.pouchNumber}</div>}
                 </td>
-                <td style={{ padding: '12px' }}>{o.customer?.fullName}</td>
-                <td style={{ padding: '12px', color: COLORS.muted, fontSize: 12, whiteSpace: 'nowrap' }}>{fmtPhone(o.customer?.phone)}</td>
+                <td style={{ padding: '12px' }}>{clientName(o.customer)}{o.status === 'PRETE' && o.notifyMode !== 'NONE' && !o.notifiedAt && <span className="pill" style={{ marginLeft: 8, background: COLORS.success + '1a', color: COLORS.success, border: `1px solid ${COLORS.success}33` }}>{o.notifyMode === 'CALL' ? '📞 à appeler' : '💬 à notifier'}</span>}</td>
+                <td style={{ padding: '12px', color: COLORS.muted, fontSize: 12, whiteSpace: 'nowrap' }}>{fmtPhone(o.customer?.phone) || fmtPhone(o.notifyPhone) || '—'}</td>
                 <td style={{ padding: '12px', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {o.description}
                 </td>

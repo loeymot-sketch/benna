@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { COLORS, ROLE_LABELS, initials } from '../lib/tokens';
+import { COLORS, ROLE_LABELS, initials, fullName } from '../lib/tokens';
 import { Logo } from '../components/Atoms';
 import { api } from '../lib/api';
 import { useAuth } from '../store/auth';
@@ -180,7 +180,7 @@ export function LoginPage() {
           >
             {initials(picked.firstName, picked.lastName)}
           </div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{picked.firstName} {picked.lastName}</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>{fullName(picked)}</div>
           <div style={{ fontSize: 12, color: COLORS.muted, marginTop: -4 }}>
             {ROLE_LABELS[picked.role] ?? picked.role} · PIN à {expectedPinLen} chiffres
           </div>
@@ -267,7 +267,7 @@ function UserPicker({ users, apiError, onPick }: { users: UserSummary[]; apiErro
             >
               {initials(u.firstName, u.lastName)}
             </div>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>{u.firstName}</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{fullName(u)}</div>
             <div style={{ fontSize: 11, color: COLORS.muted }}>{ROLE_LABELS[u.role] ?? u.role}</div>
             {!u.pinSet && (
               <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.warning }}>PIN à créer</div>

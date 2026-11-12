@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, StatusPill, UrgencyDot } from '../components/Atoms';
-import { COLORS, fmtDate, fullName } from '../lib/tokens';
+import { COLORS, fmtDate, fullName, clientName } from '../lib/tokens';
 import { useAuth } from '../store/auth';
 import { getSocket } from '../lib/socket';
 
 type DashData = {
   counters: {
     urgent: number; dueToday: number; dueTomorrow: number;
-    late: number; openCount: number;
+    late: number; openCount: number; toNotify?: number;
   };
   statusBreakdown: { status: string; _count: number }[];
 };
@@ -73,7 +73,7 @@ export function DashboardPage() {
             style={{ padding: '8px 4px', borderTop: `1px solid ${COLORS.border}` }}>
             <UrgencyDot level={o.urgency} />
             <div style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, fontWeight: 700, color: COLORS.primary, width: 130 }}>{o.ticketCode}</div>
-            <div className="flex-1 min-w-0" style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.customer?.fullName} · {o.description.slice(0, 50)}</div>
+            <div className="flex-1 min-w-0" style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{clientName(o.customer)} · {o.description.slice(0, 50)}</div>
             <div style={{ fontSize: 11, color: COLORS.muted }}>{fmtDate(o.deliveryDate)}</div>
             <StatusPill status={o.status} />
           </div>
@@ -85,6 +85,11 @@ export function DashboardPage() {
         <StatCard title="À livrer aujourd'hui" value={c.dueToday} hint="Sur la journée" color={COLORS.warning} icon="⏰" />
         <StatCard title="À livrer demain" value={c.dueTomorrow} hint="Anticipation" color={COLORS.stEnCours} icon="📅" />
         <StatCard title="En retard" value={c.late} hint="À rattraper" color={COLORS.danger} icon="🚨" />
+        {!!c.toNotify && (
+          <div onClick={() => navigate('/orders?toNotify=1')} className="cursor-pointer">
+            <StatCard title="Clients à prévenir" value={c.toNotify} hint="Commande prête · appel / WhatsApp demandé" color={COLORS.success} icon="📞" />
+          </div>
+        )}
         <StatCard title="Commandes ouvertes" value={c.openCount} hint="Hors livrées / annulées" color={COLORS.primary} icon="📋" />
       </div>
 
@@ -109,7 +114,7 @@ export function DashboardPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div style={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {o.customer?.fullName}
+                    {clientName(o.customer)}
                   </div>
                   <div style={{ fontSize: 11, color: COLORS.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {o.description.slice(0, 80)}

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
 import { Card, Avatar, Button } from '../components/Atoms';
-import { COLORS, ROLE_LABELS } from '../lib/tokens';
+import { COLORS, ROLE_LABELS, fullName } from '../lib/tokens';
 import { useAuth } from '../store/auth';
 
 export function ProfilePage() {
@@ -51,7 +51,7 @@ export function ProfilePage() {
           <div className="flex items-center gap-3 mb-4">
             <Avatar firstName={me.firstName} lastName={me.lastName} size={56} />
             <div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{me.firstName} {me.lastName}</div>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>{fullName(me)}</div>
               <div style={{ fontSize: 13, color: COLORS.muted }}>{ROLE_LABELS[me.role] ?? me.role} · PIN à {expected} chiffres</div>
             </div>
           </div>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, PostTypeChip, Avatar, Button } from '../components/Atoms';
-import { COLORS, POST_TYPE_META, timeAgo, fmtDateTime } from '../lib/tokens';
+import { COLORS, POST_TYPE_META, timeAgo, fmtDateTime, fullName } from '../lib/tokens';
 import { useAuth } from '../store/auth';
 import { getSocket } from '../lib/socket';
 
@@ -142,9 +142,9 @@ function PostCard({ post, onClick }: { post: any; onClick: () => void }) {
         <Avatar firstName={post.author.firstName} lastName={post.author.lastName} size={28} />
         <div className="flex-1 min-w-0">
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-            {post.author.firstName} {post.author.lastName}
+            {fullName(post.author)}
             {post.recipientUser && (
-              <span style={{ color: COLORS.muted, fontWeight: 500 }}> → {post.recipientUser.firstName}</span>
+              <span style={{ color: COLORS.muted, fontWeight: 500 }}> → {fullName(post.recipientUser)}</span>
             )}
             {post.scope === 'ALL' && (
               <span style={{ color: COLORS.muted, fontWeight: 500 }}> · à toute l'équipe</span>
@@ -322,7 +322,7 @@ export function ComposerPage() {
                 style={{ marginTop: 4, width: '100%', height: 38, padding: '0 12px', borderRadius: 8, border: `1px solid ${COLORS.border}`, fontSize: 14 }}
               >
                 <option value="">— Sélectionner —</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName} · {u.role}</option>)}
+                {users.map((u) => <option key={u.id} value={u.id}>{fullName(u)} · {u.role}</option>)}
               </select>
             </div>
           )}
@@ -426,9 +426,9 @@ export function PostDetailPage() {
         <div className="flex items-start gap-3 mb-3">
           <Avatar firstName={post.author.firstName} lastName={post.author.lastName} size={36} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>{post.author.firstName} {post.author.lastName}</div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>{fullName(post.author)}</div>
             <div style={{ fontSize: 12, color: COLORS.muted }}>
-              {post.scope === 'DIRECT' && post.recipientUser ? `→ ${post.recipientUser.firstName} ${post.recipientUser.lastName}` : 'à toute l\'équipe'}
+              {post.scope === 'DIRECT' && post.recipientUser ? `→ ${fullName(post.recipientUser)}` : 'à toute l\'équipe'}
             </div>
           </div>
         </div>
@@ -493,7 +493,7 @@ export function PostDetailPage() {
                 <Avatar firstName={r.author.firstName} lastName={r.author.lastName} size={26} />
                 <div className="flex-1">
                   <div className="flex items-baseline gap-2">
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{r.author.firstName}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{fullName(r.author)}</div>
                     <div style={{ fontSize: 11, color: COLORS.muted }}>{timeAgo(r.createdAt)}</div>
                   </div>
                   <div style={{ fontSize: 13, marginTop: 2, whiteSpace: 'pre-wrap' }}>{r.body}</div>
