@@ -92,8 +92,15 @@ export default async function ordersRoutes(app: FastifyInstance) {
     if (!order || order.deletedAt) return reply.code(404).send({ error: 'not_found' });
     // Liens d'accès (signés, temporaires) pour les pièces jointes
     const attachments = await Promise.all(order.attachments.map(async (a) => ({ ...a, url: await fileUrl(a.path, (k) => signFile(app, k)) })));
+    // Journal des modifications (prix, remise, paiements corrigés…) pour l'onglet Historique
+    const logs = await prisma.auditLog.findMany({
+      where: { entityType: 'Order', entityId: id, action: { in: ['ORDER_UPDATED', 'PAYMENT_RECORDED', 'PAYMENT_UPDATED', 'PAYMENT_DELETED', 'CUSTOMER_UPDATED'] } },
+      orderBy: { createdAt: 'desc' }, take: 100,
+      include: { user: { select: { firstName: true, lastName: true, role: true } } },
+    });
+    const changes = logs.map((l) => ({ id: l.id, action: l.action, createdAt: l.createdAt, user: l.user, payload: l.payload ? JSON.parse(l.payload) : null }));
     const { trackKey: _k, ...safe } = order;
-    return { order: { ...safe, attachments } };
+    return { order: { ...safe, attachments, changes } };
   });
 
   app.post('/orders', { preHandler: requireAuth }, async (req) => {
@@ -219,9 +226,27 @@ export default async function ordersRoutes(app: FastifyInstance) {
     if (data.totalAmount !== undefined || data.discountAmount !== undefined) {
       const total = data.totalAmount ?? existing.totalAmount;
       const discount = data.discountAmount ?? existing.discountAmount;
+      if (discount > total) return reply.code(400).send({ error: 'discount_exceeds_total' });
       updateData.paymentStatus = computePaymentStatus(total, existing.paidAmount, discount);
     }
     delete updateData.serviceIds;
+
+    // Ce qui change réellement (avant → après), pour l'historique des modifications
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    const norm = (v: unknown) => (v instanceof Date ? v.toISOString() : v ?? null);
+    for (const [k, v] of Object.entries(updateData)) {
+      if (k === 'paymentStatus' || k === 'notifyRequestedAt') continue;
+      const before = norm((existing as any)[k]);
+      const after = norm(v);
+      if (JSON.stringify(before) !== JSON.stringify(after)) changes[k] = { from: before, to: after };
+    }
+    if (data.serviceIds) {
+      const prev = await prisma.serviceOnOrder.findMany({ where: { orderId: id }, include: { service: { select: { name: true } } } });
+      const next = await prisma.service.findMany({ where: { id: { in: data.serviceIds } }, select: { name: true } });
+      const a = prev.map((p) => p.service.name).sort();
+      const b = next.map((n) => n.name).sort();
+      if (JSON.stringify(a) !== JSON.stringify(b)) changes.services = { from: a, to: b };
+    }
 
     const order = await prisma.$transaction(async (tx) => {
       if (data.serviceIds) {
@@ -237,10 +262,12 @@ export default async function ordersRoutes(app: FastifyInstance) {
       });
     });
 
-    await audit({
-      userId: req.user.sub, action: 'ORDER_UPDATED',
-      entityType: 'Order', entityId: id, payload: data,
-    });
+    if (Object.keys(changes).length > 0) {
+      await audit({
+        userId: req.user.sub, action: 'ORDER_UPDATED',
+        entityType: 'Order', entityId: id, payload: { changes },
+      });
+    }
     await emit('order.updated', { id });
     return { order };
   });
@@ -366,6 +393,57 @@ export default async function ordersRoutes(app: FastifyInstance) {
     });
     await emit('order.updated', { id });
     return { order: order.updated, payment: order.payment };
+  });
+
+  // Corriger un paiement mal saisi (montant ou mode) — réservé aux responsables
+  app.patch('/orders/:id/payments/:paymentId', { preHandler: [requireAuth, requireRole('ADMIN', 'MANAGER')] }, async (req, reply) => {
+    const { id, paymentId } = req.params as { id: string; paymentId: string };
+    const Body = z.object({
+      amount: z.number().positive().optional(),
+      method: z.enum(PaymentMethods).optional(),
+    });
+    const data = Body.parse(req.body);
+    const existing = await prisma.order.findUnique({ where: { id } });
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!existing || !payment || payment.orderId !== id) return reply.code(404).send({ error: 'not_found' });
+    const amount = data.amount ?? payment.amount;
+    const method = data.method ?? payment.method;
+    const order = await prisma.$transaction(async (tx) => {
+      await tx.payment.update({ where: { id: paymentId }, data: { amount, method } });
+      const newPaid = Math.max(0, existing.paidAmount - payment.amount + amount);
+      return tx.order.update({
+        where: { id },
+        data: { paidAmount: newPaid, paymentStatus: computePaymentStatus(existing.totalAmount, newPaid, existing.discountAmount) },
+      });
+    });
+    await audit({
+      userId: req.user.sub, action: 'PAYMENT_UPDATED', entityType: 'Order', entityId: id,
+      payload: { paymentId, from: { amount: payment.amount, method: payment.method }, to: { amount, method } },
+    });
+    await emit('order.updated', { id });
+    return { order };
+  });
+
+  // Supprimer un paiement saisi par erreur — réservé aux responsables
+  app.delete('/orders/:id/payments/:paymentId', { preHandler: [requireAuth, requireRole('ADMIN', 'MANAGER')] }, async (req, reply) => {
+    const { id, paymentId } = req.params as { id: string; paymentId: string };
+    const existing = await prisma.order.findUnique({ where: { id } });
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    if (!existing || !payment || payment.orderId !== id) return reply.code(404).send({ error: 'not_found' });
+    const order = await prisma.$transaction(async (tx) => {
+      await tx.payment.delete({ where: { id: paymentId } });
+      const newPaid = Math.max(0, existing.paidAmount - payment.amount);
+      return tx.order.update({
+        where: { id },
+        data: { paidAmount: newPaid, paymentStatus: computePaymentStatus(existing.totalAmount, newPaid, existing.discountAmount) },
+      });
+    });
+    await audit({
+      userId: req.user.sub, action: 'PAYMENT_DELETED', entityType: 'Order', entityId: id,
+      payload: { paymentId, amount: payment.amount, method: payment.method, createdAt: payment.createdAt },
+    });
+    await emit('order.updated', { id });
+    return { order };
   });
 
   app.delete('/orders/:id', { preHandler: [requireAuth, requireRole('ADMIN', 'MANAGER')] }, async (req, reply) => {

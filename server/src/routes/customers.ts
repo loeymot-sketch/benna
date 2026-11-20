@@ -83,6 +83,44 @@ export default async function customersRoutes(app: FastifyInstance) {
     return { customer };
   });
 
+  // Modifier la fiche client (nom, GSM, email, notes). orderId : pour tracer la modification dans l'historique de la commande.
+  app.patch('/customers/:id', { preHandler: requireAuth }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const Body = z.object({
+      fullName: z.string().optional(),
+      phone: PhoneSchema,
+      email: z.string().email().optional().nullable().or(z.literal('').transform(() => null)),
+      notes: z.string().optional().nullable(),
+      orderId: z.string().optional(),
+    });
+    const raw = (req.body ?? {}) as Record<string, unknown>;
+    const data = Body.parse(raw);
+    const existing = await prisma.customer.findUnique({ where: { id } });
+    if (!existing) return reply.code(404).send({ error: 'not_found' });
+    const update: Record<string, unknown> = {};
+    if (data.fullName !== undefined) update.fullName = data.fullName.trim();
+    if ('phone' in raw) {
+      const phone = data.phone ? normalizePhone(data.phone) : null;
+      if (phone && phone !== existing.phone) {
+        const other = await prisma.customer.findUnique({ where: { phone } });
+        if (other && other.id !== id) return reply.code(409).send({ error: 'phone_exists', customer: other });
+      }
+      update.phone = phone;
+    }
+    if ('email' in raw) update.email = data.email ?? null;
+    if ('notes' in raw) update.notes = data.notes ?? null;
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const [k, v] of Object.entries(update)) {
+      if (((existing as any)[k] ?? null) !== (v ?? null)) changes[k] = { from: (existing as any)[k] ?? null, to: v ?? null };
+    }
+    const customer = await prisma.customer.update({ where: { id }, data: update });
+    if (Object.keys(changes).length > 0) {
+      await audit({ userId: req.user.sub, action: 'CUSTOMER_UPDATED', entityType: 'Customer', entityId: id, payload: { changes } });
+      if (data.orderId) await audit({ userId: req.user.sub, action: 'CUSTOMER_UPDATED', entityType: 'Order', entityId: data.orderId, payload: { changes } });
+    }
+    return { customer };
+  });
+
   // Find or auto-create — used by order creation flow
   app.post('/customers/lookup-or-create', { preHandler: requireAuth }, async (req) => {
     const Body = z.object({

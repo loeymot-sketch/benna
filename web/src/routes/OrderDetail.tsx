@@ -6,6 +6,8 @@ import { shrinkImage } from '../lib/image';
 import { Card, StatusPill, UrgencyDot, Button, PostTypeChip, Avatar } from '../components/Atoms';
 import { COLORS, fmtTND, fmtDate, fmtDateTime, timeAgo, fmtPhone, fullName, clientName, localISODate, STATUS_LABELS } from '../lib/tokens';
 import { getSocket } from '../lib/socket';
+import { useAuth } from '../store/auth';
+import { EditOrderModal, EditCustomerModal, EditPaymentModal } from '../components/OrderEditModals';
 
 const PAYMENT_METHODS = ['ESPECES','CARTE','VIREMENT','CHEQUE','D17','EDINAR','AUTRE'];
 
@@ -15,6 +17,8 @@ export function OrderDetailPage() {
   const [tab, setTab] = useState<'infos' | 'attachments' | 'history' | 'payments' | 'carnet'>('infos');
   const [users, setUsers] = useState<any[]>([]);
   const [showQr, setShowQr] = useState(false);
+  const [editing, setEditing] = useState<null | 'order' | 'price' | 'customer'>(null);
+  const me = useAuth((s) => s.user);
   const navigate = useNavigate();
 
   const reload = () => api.get(`/orders/${id}`).then((r) => setOrder(r.data.order));
@@ -44,6 +48,12 @@ export function OrderDetailPage() {
     await api.patch(`/orders/${id}`, { assignedToId });
     reload();
   };
+  const removeOrder = async () => {
+    if (!window.confirm(`Supprimer définitivement la commande ${order.ticketCode} ?`)) return;
+    await api.delete(`/orders/${id}`);
+    navigate('/orders');
+  };
+  const linkBtn: React.CSSProperties = { background: 'none', border: 'none', color: COLORS.primary, fontSize: 12, cursor: 'pointer', textDecoration: 'underline', padding: 0 };
 
   return (
     <div className="p-6">
@@ -63,18 +73,26 @@ export function OrderDetailPage() {
               <UrgencyDot level={order.urgency} /> {order.urgency}
             </div>
           </div>
-          <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>{clientName(order.customer)}</div>
+          <div className="flex items-baseline gap-3 flex-wrap" style={{ marginBottom: 4 }}>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{clientName(order.customer)}</div>
+            <button type="button" onClick={() => setEditing('customer')} style={linkBtn}>modifier le client</button>
+          </div>
           <div style={{ fontSize: 13, color: COLORS.muted }}>
             {fmtPhone(order.customer?.phone) || fmtPhone(order.notifyPhone) || 'Pas de GSM'}{order.pouchNumber && ` · Pochette ${order.pouchNumber}`} · {order.shop?.name}
           </div>
         </div>
-        <div className="text-right">
-          <div style={{ fontSize: 12, color: COLORS.muted }}>Total</div>
-          <div style={{ fontSize: 22, fontWeight: 800 }}>{fmtTND(order.totalAmount)}</div>
+        <button type="button" onClick={() => setEditing('price')} title="Modifier le prix" className="text-right"
+          style={{ background: 'none', border: `1px dashed transparent`, borderRadius: 10, padding: '4px 8px', cursor: 'pointer', color: COLORS.text }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = COLORS.border)} onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'transparent')}>
+          <div style={{ fontSize: 12, color: COLORS.muted }}>Total ✏️</div>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>{fmtTND(order.totalAmount - order.discountAmount)}</div>
+          {order.discountAmount > 0 && (
+            <div style={{ fontSize: 11, color: COLORS.muted }}><s>{fmtTND(order.totalAmount)}</s> · remise {fmtTND(order.discountAmount)}</div>
+          )}
           <div style={{ fontSize: 11, color: due > 0 ? COLORS.danger : COLORS.success, fontWeight: 600, marginTop: 2 }}>
             {due > 0 ? `Reste ${fmtTND(due)}` : '✓ Soldée'}
           </div>
-        </div>
+        </button>
       </div>
 
       <StatusPanel order={order} onChange={reload} />
@@ -89,12 +107,19 @@ export function OrderDetailPage() {
           <option value="">Non assigné</option>
           {users.map((u) => <option key={u.id} value={u.id}>{fullName(u)} · {u.role}</option>)}
         </select>
+        <Button onClick={() => setEditing('order')}>✏️ Modifier la commande</Button>
+        <Button variant="secondary" onClick={() => setEditing('price')}>💰 Changer le prix</Button>
         <Button variant="secondary" onClick={() => setShowQr(true)}>📱 Afficher le QR client</Button>
         <div className="flex-1" />
         <Button variant="secondary" onClick={() => setTab('carnet')}>📓 Ajouter au Carnet</Button>
+        {me?.role === 'ADMIN' && <Button variant="ghost" onClick={removeOrder} style={{ color: COLORS.danger }}>🗑 Supprimer</Button>}
       </div>
 
       {showQr && <QrModal order={order} onClose={() => setShowQr(false)} />}
+      {(editing === 'order' || editing === 'price') && (
+        <EditOrderModal order={order} focus={editing === 'price' ? 'price' : undefined} onClose={() => setEditing(null)} onSaved={reload} />
+      )}
+      {editing === 'customer' && <EditCustomerModal order={order} onClose={() => setEditing(null)} onSaved={reload} />}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4" style={{ borderBottom: `1px solid ${COLORS.border}` }}>
@@ -102,7 +127,7 @@ export function OrderDetailPage() {
           { id: 'infos', label: 'Infos' },
           { id: 'payments', label: `Paiements (${order.payments?.length ?? 0})` },
           { id: 'attachments', label: `Pièces jointes (${order.attachments?.length ?? 0})` },
-          { id: 'history', label: 'Historique' },
+          { id: 'history', label: `Historique (${(order.statusHistory?.length ?? 0) + (order.changes?.length ?? 0)})` },
           { id: 'carnet', label: `Carnet (${order.posts?.length ?? 0})` },
         ].map((t) => (
           <button
@@ -121,20 +146,23 @@ export function OrderDetailPage() {
         ))}
       </div>
 
-      {tab === 'infos' && <InfoTab order={order} />}
-      {tab === 'payments' && <PaymentsTab order={order} onChange={reload} />}
+      {tab === 'infos' && <InfoTab order={order} onEdit={() => setEditing('order')} />}
+      {tab === 'payments' && <PaymentsTab order={order} onChange={reload} canFix={me?.role === 'ADMIN' || me?.role === 'MANAGER'} onEditPrice={() => setEditing('price')} />}
       {tab === 'attachments' && <AttachmentsTab order={order} onChange={reload} />}
-      {tab === 'history' && <HistoryTab order={order} />}
+      {tab === 'history' && <HistoryTab order={order} users={users} />}
       {tab === 'carnet' && <CarnetTab order={order} users={users} onChange={reload} />}
     </div>
   );
 }
 
-function InfoTab({ order }: { order: any }) {
+function InfoTab({ order, onEdit }: { order: any; onEdit: () => void }) {
   return (
     <div className="grid gap-4" style={{ gridTemplateColumns: '2fr 1fr' }}>
       <Card style={{ padding: 18 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.4 }}>DESCRIPTION</div>
+        <div className="flex items-center justify-between">
+          <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.4 }}>DESCRIPTION</div>
+          <Button size="sm" variant="secondary" onClick={onEdit}>✏️ Modifier</Button>
+        </div>
         <div style={{ fontSize: 14, marginTop: 8, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{order.description}</div>
         {order.services?.length > 0 && (
           <>
@@ -192,30 +220,48 @@ function InfoTab({ order }: { order: any }) {
         </div>
         <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.4, marginTop: 18 }}>LIVRAISON</div>
         <div style={{ fontSize: 14, marginTop: 4 }}>{fmtDate(order.deliveryDate)} {order.deliveryTime && `· ${order.deliveryTime}`}</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.muted, letterSpacing: 0.4, marginTop: 18 }}>PRIX</div>
+        <div style={{ fontSize: 13, marginTop: 4, lineHeight: 1.7 }}>
+          <div>Total : <strong>{fmtTND(order.totalAmount)}</strong></div>
+          {order.discountAmount > 0 && <div>Remise : <strong>− {fmtTND(order.discountAmount)}</strong></div>}
+          <div>Payé : <strong style={{ color: COLORS.success }}>{fmtTND(order.paidAmount)}</strong></div>
+        </div>
       </Card>
     </div>
   );
 }
 
-function PaymentsTab({ order, onChange }: { order: any; onChange: () => void }) {
+function PaymentsTab({ order, onChange, canFix, onEditPrice }: { order: any; onChange: () => void; canFix: boolean; onEditPrice: () => void }) {
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('ESPECES');
-  const due = Math.max(0, order.totalAmount - order.discountAmount - order.paidAmount);
+  const [fixing, setFixing] = useState<any>(null);
+  const [error, setError] = useState('');
+  const net = order.totalAmount - order.discountAmount;
+  const balance = net - order.paidAmount;
+  const due = Math.max(0, balance);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const a = parseFloat(amount);
+    const a = parseFloat(amount.replace(',', '.'));
     if (!a || a <= 0) return;
-    await api.post(`/orders/${order.id}/payments`, { amount: a, method });
-    setAmount(''); onChange();
+    if (a > due + 0.0005 && !window.confirm(`Le montant (${fmtTND(a)}) dépasse le reste à payer (${fmtTND(due)}). Encaisser quand même ?`)) return;
+    setError('');
+    try {
+      await api.post(`/orders/${order.id}/payments`, { amount: a, method });
+      setAmount(''); onChange();
+    } catch { setError('Encaissement impossible, réessaie.'); }
   };
 
   return (
     <Card style={{ padding: 18 }}>
-      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
         <Stat label="Total" value={fmtTND(order.totalAmount)} />
+        {order.discountAmount > 0 && <Stat label="Remise" value={`− ${fmtTND(order.discountAmount)}`} color={COLORS.warning} />}
         <Stat label="Payé" value={fmtTND(order.paidAmount)} color={COLORS.success} />
-        <Stat label="Reste" value={fmtTND(due)} color={due > 0 ? COLORS.danger : COLORS.success} />
+        <Stat label={balance < 0 ? 'Trop payé' : 'Reste'} value={fmtTND(Math.abs(balance))} color={balance > 0 ? COLORS.danger : balance < 0 ? COLORS.warning : COLORS.success} />
+      </div>
+      <div className="flex gap-2 mb-4 flex-wrap">
+        <Button size="sm" variant="secondary" onClick={onEditPrice}>💰 Changer le prix / la remise</Button>
       </div>
       {due > 0 && (
         <form onSubmit={submit} className="flex gap-2 mb-4 flex-wrap items-end">
@@ -236,8 +282,11 @@ function PaymentsTab({ order, onChange }: { order: any; onChange: () => void }) 
             </select>
           </div>
           <Button type="submit">Encaisser</Button>
+          <Button variant="secondary" onClick={() => setAmount(String(Math.round(due * 1000) / 1000))}>Tout le reste ({fmtTND(due)})</Button>
         </form>
       )}
+      {error && <div role="alert" style={{ color: COLORS.danger, fontSize: 13, marginBottom: 10 }}>{error}</div>}
+      {fixing && <EditPaymentModal order={order} payment={fixing} methods={PAYMENT_METHODS} onClose={() => setFixing(null)} onSaved={onChange} />}
       <div>
         {order.payments?.length === 0 && <div style={{ color: COLORS.muted, fontSize: 13 }}>Aucun paiement.</div>}
         {order.payments?.map((p: any) => (
@@ -247,7 +296,10 @@ function PaymentsTab({ order, onChange }: { order: any; onChange: () => void }) 
               <div>{fmtDateTime(p.createdAt)}</div>
               {p.receivedBy && <div style={{ color: COLORS.muted, fontSize: 12 }}>par {p.receivedBy.firstName}</div>}
             </div>
-            <div style={{ fontWeight: 700 }}>{fmtTND(p.amount)}</div>
+            <div className="flex items-center gap-3">
+              <div style={{ fontWeight: 700 }}>{fmtTND(p.amount)}</div>
+              {canFix && <Button size="sm" variant="ghost" onClick={() => setFixing(p)}>✏️ Corriger</Button>}
+            </div>
           </div>
         ))}
       </div>
@@ -306,10 +358,53 @@ function AttachmentsTab({ order, onChange }: { order: any; onChange: () => void 
   );
 }
 
-function HistoryTab({ order }: { order: any }) {
+const FIELD_LABELS: Record<string, string> = {
+  totalAmount: 'Prix total', discountAmount: 'Remise', description: 'Description', urgency: 'Urgence',
+  deliveryDate: 'Date de livraison', deliveryTime: 'Heure de livraison', internalNotes: 'Notes internes',
+  assignedToId: 'Assigné à', pouchNumber: 'N° pochette', productionSubStatus: 'Sous-étape production',
+  plannedFor: 'Date annoncée', plannedNote: 'Précision', notifyMode: 'Prévenir le client', notifyPhone: 'Numéro à prévenir',
+  services: 'Services', fullName: 'Nom du client', phone: 'GSM du client', email: 'Email du client', notes: 'Notes client',
+};
+const MONEY = new Set(['totalAmount', 'discountAmount']);
+const DATES = new Set(['deliveryDate', 'plannedFor']);
+
+function fmtVal(field: string, v: any, users: any[]): string {
+  if (v === null || v === undefined || v === '') return '—';
+  if (MONEY.has(field)) return fmtTND(Number(v));
+  if (DATES.has(field)) return fmtDate(v);
+  if (field === 'assignedToId') { const u = users.find((x) => x.id === v); return u ? fullName(u) : 'un membre'; }
+  if (Array.isArray(v)) return v.length ? v.join(', ') : '—';
+  const s = String(v);
+  return s.length > 60 ? s.slice(0, 60) + '…' : s;
+}
+
+function changeLines(c: any, users: any[]): string[] {
+  const p = c.payload ?? {};
+  if (c.action === 'PAYMENT_RECORDED') return [`Paiement encaissé : ${fmtTND(p.amount)} (${p.method})`];
+  if (c.action === 'PAYMENT_DELETED') return [`Paiement supprimé : ${fmtTND(p.amount)} (${p.method})`];
+  if (c.action === 'PAYMENT_UPDATED') return [`Paiement corrigé : ${fmtTND(p.from?.amount)} ${p.from?.method} → ${fmtTND(p.to?.amount)} ${p.to?.method}`];
+  if (p.changes) return Object.entries(p.changes).map(([k, v]: [string, any]) => `${FIELD_LABELS[k] ?? k} : ${fmtVal(k, v.from, users)} → ${fmtVal(k, v.to, users)}`);
+  return ['Commande modifiée'];
+}
+
+function HistoryTab({ order, users }: { order: any; users: any[] }) {
+  const entries = [
+    ...(order.statusHistory ?? []).map((h: any) => ({ kind: 'status', at: h.createdAt, h })),
+    ...(order.changes ?? []).map((c: any) => ({ kind: 'change', at: c.createdAt, c })),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
   return (
     <Card style={{ padding: 18 }}>
-      {order.statusHistory?.map((h: any) => (
+      {entries.map((e: any) => e.kind === 'change' ? (
+        <div key={e.c.id} className="flex gap-3" style={{ padding: '10px 0', borderBottom: `1px solid ${COLORS.border}` }}>
+          <div style={{ width: 8, height: 8, borderRadius: 999, background: COLORS.warning, marginTop: 6 }} />
+          <div className="flex-1">
+            {changeLines(e.c, users).map((l, i) => <div key={i} style={{ fontSize: 13 }}>✏️ {l}</div>)}
+            <div style={{ fontSize: 11, color: COLORS.muted, marginTop: 4 }}>
+              {fmtDateTime(e.c.createdAt)}{e.c.user && ` · par ${fullName(e.c.user)}`}
+            </div>
+          </div>
+        </div>
+      ) : (() => { const h = e.h; return (
         <div key={h.id} className="flex gap-3" style={{ padding: '10px 0', borderBottom: `1px solid ${COLORS.border}` }}>
           <div style={{ width: 8, height: 8, borderRadius: 999, background: COLORS.primary, marginTop: 6 }} />
           <div className="flex-1">
@@ -324,7 +419,7 @@ function HistoryTab({ order }: { order: any }) {
             {h.comment && <div style={{ fontSize: 12, color: COLORS.muted, marginTop: 4, fontStyle: 'italic' }}>"{h.comment}"</div>}
           </div>
         </div>
-      ))}
+      ); })())}
     </Card>
   );
 }
